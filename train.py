@@ -30,9 +30,8 @@ if __name__ == '__main__':
     print(' > config:', cmd.config)
     print(' >    exp:', args.env.expdir)
 
-    # load model
+    # load model - 'Sins' & 'CombSub' supported
     model = None
-    
     if args.model.type == 'Sins':
         model = Sins(
             sampling_rate=args.data.sampling_rate,
@@ -42,7 +41,6 @@ if __name__ == '__main__':
             n_mag_noise=args.model.n_mag_noise,
             n_unit=args.data.encoder_out_channels,
             n_spk=args.model.n_spk)
- 
     elif args.model.type == 'CombSub':
         model = CombSub(
             sampling_rate=args.data.sampling_rate,
@@ -52,7 +50,6 @@ if __name__ == '__main__':
             n_mag_noise=args.model.n_mag_noise,
             n_unit=args.data.encoder_out_channels,
             n_spk=args.model.n_spk)
-            
     else:
         raise ValueError(f" [x] Unknown Model: {args.model.type}")
     
