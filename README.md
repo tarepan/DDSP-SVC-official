@@ -1,136 +1,98 @@
-Language: **English** [简体中文](./cn_README.md)
 # DDSP-SVC
-<div align="center">
-<img src="https://storage.googleapis.com/ddsp/github_images/ddsp_logo.png" width="200px" alt="logo"></img>
-</div>
-End-to-end singing voice conversion system based on DDSP (Differentiable Digital Signal Processing）.
+Clone of singing voice conversion based on DDSP.
 
-## 0. Introduction
-DDSP-SVC is a new open source singing voice conversion project dedicated to the development of free AI voice changer software that can be popularized on personal computers.
+## Introduction
+Features compared to [Diff-SVC](https://github.com/prophesier/diff-svc) and [SO-VITS-SVC](https://github.com/svc-develop-team/so-vits-svc):
 
-Compared with the more famous [Diff-SVC](https://github.com/prophesier/diff-svc) and [SO-VITS-SVC](https://github.com/svc-develop-team/so-vits-svc),  its training and synthesis have much lower requirements for computer hardware, and the training time can be shortened by orders of magnitude.
+- light training
+- fast inference
+- Equivalent or lower quality
+  - sub-optimal quality w/o enhancer
+  - optimal quality w/ enhancer (close to SO-VITS-SVC, not the level of Diff-SVC)
 
-Although the original synthesis quality of DDSP is not ideal (the original output can be heard in tensorboard while training), after using the pre-trained vocoder-based enhancer, the sound quality can reach a level close to SO-VITS-SVC.
-
-If the quality of the training data is very high, probably still Diff-SVC will have the highest sound quality. The demo outputs are in the `samples` folder,  and the related model checkpoint can be downloaded from the release page.
-
-Disclaimer: Please make sure to only train DDSP-SVC models with **legally obtained authorized data**, and do not use these models and any audio they synthesize for illegal purposes. The author of this repository is not responsible for any infringement, fraud and other illegal acts caused by the use of these model checkpoints and audio.
-
-## 1. Installing the dependencies
-We recommend first installing PyTorch from the [**official website**](https://pytorch.org/), then run:
+## Setup
 ```bash
 pip install -r requirements.txt 
 ```
-NOTE : I only test the code using python 3.8 (windows) + pytorch 1.9.1 + torchaudio 0.6.0, too new or too old dependencies may not work
-## 2. Configuring the pretrained model
+Tested on python 3.8 (windows) + pytorch 1.9.1 + torchaudio 0.6.0
+
+Then, configure the pretrained models:
+
 - **(Required)** Download the pretrained [**HubertSoft**](https://github.com/bshall/hubert/releases/download/v0.1/hubert-soft-0d54a1f4.pt)   encoder and put it under `pretrain/hubert` folder.
 -  Get the pretrained vocoder-based enhancer from the [DiffSinger Community Vocoders Project](https://openvpi.github.io/vocoders) and unzip it into `pretrain/` folder
-## 3. Preprocessing
 
-Put all the training dataset (.wav format audio clips) in the below directory:
-`data/train/audio`. 
-Put all the validation dataset (.wav format audio clips) in the below directory:
-`data/val/audio`.
+## Preprocessing
+
+First, place audio files under the directory structured like below:
+```bash
+data/
+    val/audio/
+    train/audio/
+        1/
+        2/
+            ccc.wav
+            ddd.wav
+```
+
+Speaker folder name should be **positive integers not greater than 'n_spk'** to represent speaker ids.  
+
 You can also run
 ```bash
 python draw.py
 ```
 to help you select validation data (you can adjust the parameters in `draw.py` to modify the number of extracted files and other parameters)
 
-Then run
+Then run:
 ```bash
-python preprocess.py -c configs/combsub.yaml
-```
-for a model of combtooth substractive synthesiser, or run
-```bash
-python preprocess.py -c configs/sins.yaml
-```
-for a model of sinusoids additive synthesiser.
-
-You can modify the configuration file `config/<model_name>.yaml` before preprocessing. The default configuration is suitable for training 44.1khz high sampling rate synthesiser with GTX-1660 graphics card.
-
-NOTE 1: Please keep the sampling rate of all audio clips consistent with the sampling rate in the yaml configuration file ! If it is not consistent, the program can be executed safely, but the resampling during the training process will be very slow.
-
-NOTE 2: The total number of the audio clips for training dataset is recommended to be about 1000,  especially long audio clip can be cut into short segments, which will speed up the training, but the duration of all audio clips should not be less than 2 seconds. If there are too many audio clips, you need a large internal-memory or set the 'cache_all_data' option to false in the configuration file.
-
-NOTE 3: The total number of the audio clips for validation dataset is recommended to be about 10, please don't put too many or it will be very slow to do the validation.
-
-UPDATE: Multi-speaker training is supported now. The 'n_spk' parameter in configuration file controls whether it is a multi-speaker model.  If you want to train a **multi-speaker** model, audio folders need to be named with **positive integers not greater than 'n_spk'** to represent speaker ids, the directory structure is like below:
-```bash
-# training dataset
-# the 1st speaker
-data/train/audio/1/aaa.wav
-data/train/audio/1/bbb.wav
-...
-# the 2nd speaker
-data/train/audio/2/ccc.wav
-data/train/audio/2/ddd.wav
-...
-
-# validation dataset
-# the 1st speaker
-data/val/audio/1/eee.wav
-data/val/audio/1/fff.wav
-...
-# the 2nd speaker
-data/val/audio/2/ggg.wav
-data/val/audio/2/hhh.wav
-...
-```
-If 'n_spk'  = 1, The directory structure of the **single speaker** model is still supported, which is like below:
-```bash
-# training dataset
-data/train/audio/aaa.wav
-data/train/audio/bbb.wav
-...
-# validation dataset
-data/val/audio/ccc.wav
-data/val/audio/ddd.wav
-...
+python preprocess.py -c <seletct_config_as___configs/combsub.yaml>
 ```
 
-## 4. Training
+- Configs
+  - sampling rate: 44.1khz
+  - commons: optimized for NVIDIA GTX 1660
+  - 'n_spk'
+    - `1`: single-speaker model
+    - `2` or more: multi-speaker model
+- Restrictions
+  - assert 'audio_sr == config_sr'. If not, training becomes very slow by resampling.
+  - assert '2sec <= len(audio) <= not_too_long'
+  - assert 'n_clip ~ 1000 if cache_all_data is True' because of on-memory cache size
+  - assert 'n_val_clip <= 10' because of validation cost
+
+## Training
 ```bash
-# train a combsub model as an example
-python train.py -c configs/combsub.yaml
+python train.py -c <seletct_config_as___configs/combsub.yaml>
 ```
-The command line for training other models is similar.
+The test audio samples in Tensorboard are the outputs of DDSP-SVC w/o enhancer.  
 
 You can safely interrupt training, then running the same command line will resume training.
 
 You can also finetune the model if you interrupt training first, then re-preprocess the new dataset or change the training parameters (batchsize, lr etc.) and then run the same command line.
 
-## 5. Visualization
+## Inference
+Pretrained model is provided in GitHub release.  
+With provided model or your trained model, run:
 ```bash
-# check the training status using tensorboard
-tensorboard --logdir=exp
-```
-Test audio samples will be visible in TensorBoard after the first validation.
-
-NOTE: The test audio samples in Tensorboard are the original outputs of your DDSP-SVC model that is not enhanced by an enhancer. If you want to test the synthetic effect after using the enhancer  (which may have higher quality) , please use the method described in the following chapter.
-## 6. Testing
-```bash
-# origin output of ddsp-svc
-# fast, but relatively low audio quality (like you hear in tensorboard)
+# Pure DDSP
 python main.py -i <input.wav> -m <model_file.pt> -o <output.wav> -k <keychange (semitones)> -id <speaker_id>
-```
-```bash
-# enhanced the output using the pretrained vocoder-based enhancer 
-# high audio quality in the normal vocal range if enhancer_adaptive_key = 0 (default)
-# set enhancer_adaptive_key > 0 to adapt the enhancer to a higher vocal range
+
+# PPSP + enhancer
+## if normal vocal range, set `enhancer_adaptive_key` to 0, else to >0
 python main.py -i <input.wav> -m <model_file.pt> -o <output.wav> -k <keychange (semitones)> -id <speaker_id> -e true -eak <enhancer_adaptive_key (semitones)>
 ```
+
 ```bash
 # other options about the f0 extractor and response threhold, see
 python main.py -h
 ```
+
 UPDATE：Mix-speaker is supported now. You can use "-mix" option to design your own vocal timbre, below is an example:
 ```bash
 # Mix the timbre of 1st and 2nd speaker in a 0.5 to 0.5 ratio
 python main.py -i <input.wav> -m <model_file.pt> -o <output.wav> -k <keychange (semitones)> -mix "{1:0.5, 2:0.5}" -e true -eak 0
 
 ```
-## 7. HTTP Server and VST supported
+## HTTP Server and VST supported
 Start the server with the following command
 ```bash
 # configs are in this python file, see the comments (Chinese only)
@@ -139,8 +101,8 @@ python flask_api.py
 Currently supported VST client:
 https://github.com/zhaohui8969/VST_NetProcess-
 
-## 8. Acknowledgement
-* [ddsp](https://github.com/magenta/ddsp)
-* [pc-ddsp](https://github.com/yxlllc/pc-ddsp)
-* [soft-vc](https://github.com/bshall/soft-vc)
-* [DiffSinger (OpenVPI version)](https://github.com/openvpi/DiffSinger)
+## Acknowledgement
+- [ddsp](https://github.com/magenta/ddsp)
+- [pc-ddsp](https://github.com/yxlllc/pc-ddsp)
+- [soft-vc](https://github.com/bshall/soft-vc)
+- [DiffSinger (OpenVPI version)](https://github.com/openvpi/DiffSinger)
