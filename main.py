@@ -69,7 +69,7 @@ if __name__ == '__main__':
     model, args = load_model(cmd.model_path, device=device)
     
     # load input :: (T,)
-    audio, sr_i = librosa.load(cmd.input, sr=None, mono=True)
+    audio, sr_i = librosa.load(cmd.input, sr=cmd.sampling_rate, mono=True)
     hop_size = args.data.block_size * sr_i / args.data.sampling_rate
     
     # Analysis
