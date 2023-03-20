@@ -44,17 +44,9 @@ def load_wav_to_torch(full_path, target_sr=None, return_empty_on_exception=False
     
     return data, sampling_rate
 
-def dynamic_range_compression(x, C=1, clip_val=1e-5):
-    return np.log(np.clip(x, a_min=clip_val, a_max=None) * C)
-
-def dynamic_range_decompression(x, C=1):
-    return np.exp(x) / C
-
 def dynamic_range_compression_torch(x, C=1, clip_val=1e-5):
     return torch.log(torch.clamp(x, min=clip_val) * C)
 
-def dynamic_range_decompression_torch(x, C=1):
-    return torch.exp(x) / C
 
 class STFT():
     def __init__(self, sr=22050, n_mels=80, n_fft=1024, win_size=1024, hop_length=256, fmin=20, fmax=11025, clip_val=1e-5):

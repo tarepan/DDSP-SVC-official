@@ -5,13 +5,12 @@ gin
 gin_config
 librosa
 local_attention
-matplotlib
 numpy
 praat-parselmouth
 pyworld
 PyYAML
 resampy
-scikit_learn
+# scikit_learn
 scipy
 SoundFile
 tensorboard
