@@ -70,6 +70,11 @@ def test(args, model, loss_func, loader_test, saver):
 
 
 def train(args, initial_global_step, model, optimizer, loss_func, loader_train, loader_test):
+    """
+    Args:
+
+        model - Sins | CombSub
+    """
     # Init
     ## Saver
     saver = Saver(args, initial_global_step=initial_global_step)

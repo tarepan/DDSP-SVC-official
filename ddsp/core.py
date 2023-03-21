@@ -25,10 +25,15 @@ def get_fft_size(frame_size: int, ir_size: int, power_of_2: bool = True):
 
 
 def upsample(signal, factor):
+    """
+    """
     signal = signal.permute(0, 2, 1)
+
     signal = nn.functional.interpolate(torch.cat((signal,signal[:,:,-1:]),2), size=signal.shape[-1] * factor + 1, mode='linear', align_corners=True)
     signal = signal[:,:,:-1]
-    return signal.permute(0, 2, 1)
+
+    signal = signal.permute(0, 2, 1)
+    return signal
 
 
 def remove_above_fmax(amplitudes, pitch, fmax, level_start=1):
@@ -53,7 +58,7 @@ def crop_and_compensate_delay(audio, audio_size, ir_size,
     delay_compensation: Samples to crop from start of output audio to compensate
       for group delay of the impulse response. If delay_compensation < 0 it
       defaults to automatically calculating a constant group delay of the
-      windowed linear phase filter from frequency_impulse_response().
+      windowed linear phase filter from _frequency_impulse_response().
   Returns:
     Tensor of cropped and shifted audio.
   Raises:
@@ -69,7 +74,7 @@ def crop_and_compensate_delay(audio, audio_size, ir_size,
                      'of {}.'.format(padding))
 
   # Compensate for the group delay of the filter by trimming the front.
-  # For an impulse response produced by frequency_impulse_response(),
+  # For an impulse response produced by _frequency_impulse_response(),
   # the group delay is constant because the filter is linear phase.
   total_size = int(audio.shape[-1])
   crop = total_size - crop_size
@@ -78,25 +83,22 @@ def crop_and_compensate_delay(audio, audio_size, ir_size,
   return audio[:, start:-end]
 
 
-def fft_convolve(audio,
-                 impulse_response): # B, n_frames, 2*(n_mags-1)
+def fft_convolve(audio, impulse_response): # B, n_frames, 2*(n_mags-1)
     """Filter audio with frames of time-varying impulse responses.
-    Time-varying filter. Given audio [batch, n_samples], and a series of impulse
-    responses [batch, n_frames, n_impulse_response], splits the audio into frames,
-    applies filters, and then overlap-and-adds audio back together.
+    Time-varying filter. Given a series of impulse responses, 
+    1. splits the audio into frames based on the number of IR frames
+    2. applies filters through frequency domain
+    3. overlap-and-adds audio back together
+
     Applies non-windowed non-overlapping STFT/ISTFT to efficiently compute
     convolution for large impulse response sizes.
+
     Args:
-        audio: Input audio. Tensor of shape [batch, audio_timesteps].
-        impulse_response: Finite impulse response to convolve. Can either be a 2-D
-        Tensor of shape [batch, ir_size], or a 3-D Tensor of shape [batch,
-        ir_frames, ir_size]. A 2-D tensor will apply a single linear
-        time-invariant filter to the audio. A 3-D Tensor will apply a linear
-        time-varying filter. Automatically chops the audio into equally shaped
-        blocks to match ir_frames.
+        audio :: (B, T) - Input audio
+        impulse_response: Finite impulse response to convolve.
+        (B, ir_size) | (B, Frame, ir_size) - Finite impulse response of LTI or LTV filter. Automatically chops the audio into equally shaped blocks to match ir_frames.
     Returns:
-        audio_out: Convolved audio. Tensor of shape
-            [batch, audio_timesteps].
+        audio_out :: (B, T) - Convolved audio
     """
     # Add a frame dimension to impulse response if it doesn't have one.
     ir_shape = impulse_response.size() 
@@ -110,8 +112,7 @@ def fft_convolve(audio,
 
     # Validate that batch sizes match.
     if batch_size != batch_size_ir:
-        raise ValueError('Batch size of audio ({}) and impulse response ({}) must '
-                        'be the same.'.format(batch_size, batch_size_ir))
+        raise ValueError(f'Batch size of audio ({batch_size}) and impulse response ({batch_size_ir}) must be the same.')
 
     # Cut audio into 50% overlapped frames (center padding).
     hop_size = int(audio_size / n_ir_frames)
@@ -121,16 +122,13 @@ def fft_convolve(audio,
     # Apply Bartlett (triangular) window
     window = torch.bartlett_window(frame_size).to(audio_frames)
     audio_frames = audio_frames * window
-    
-    # Pad and FFT the audio and impulse responses.
-    fft_size = get_fft_size(frame_size, ir_size, power_of_2=False)
-    audio_fft = torch.fft.rfft(audio_frames, fft_size)
-    ir_fft = torch.fft.rfft(torch.cat((impulse_response,impulse_response[:,-1:,:]),1), fft_size)
-    
-    # Multiply the FFTs (same as convolution in time).
-    audio_ir_fft = torch.multiply(audio_fft, ir_fft)
 
-    # Take the IFFT to resynthesize audio.
+    # Filtering (convolution) - through frequency domain by FFT/Multiply/iFFT
+    ## Pad and FFT the audio and impulse responses.
+    fft_size = get_fft_size(frame_size, ir_size, power_of_2=False)
+    audio_fft = torch.fft.rfft(audio_frames,                                              fft_size)
+    ir_fft    = torch.fft.rfft(torch.cat((impulse_response,impulse_response[:,-1:,:]),1), fft_size)
+    audio_ir_fft = torch.multiply(audio_fft, ir_fft)
     audio_frames_out = torch.fft.irfft(audio_ir_fft, fft_size)
     
     # Overlap Add
@@ -212,10 +210,15 @@ def apply_dynamic_window_to_impulse_response(impulse_response,  # B, n_frames, 2
     return impulse_response
     
         
-def frequency_impulse_response(magnitudes,
-                               hann_window = True,
-                               half_width_frames = None):
-                               
+def _frequency_impulse_response(magnitudes, hann_window = True, half_width_frames = None):
+    """
+    no-window -> iFFT + roll
+    window ----> iFFT
+
+    Args:
+        magnitudes
+    """
+
     # Get the IR
     impulse_response = torch.fft.irfft(magnitudes) # B, n_frames, 2*(n_mags-1)
     
@@ -226,17 +229,17 @@ def frequency_impulse_response(magnitudes,
         else:
             impulse_response = apply_dynamic_window_to_impulse_response(impulse_response, half_width_frames)
     else:
+        # Shift last dimension
         impulse_response = impulse_response.roll(impulse_response.size(-1) // 2, -1)
        
     return impulse_response
 
 
-def frequency_filter(audio,
-                     magnitudes,
-                     hann_window=True,
-                     half_width_frames=None):
+def frequency_filter(audio, magnitudes, hann_window=True, half_width_frames=None):
+    """Apply filter toward an audio."""
+    # Frequency response to 
 
-    impulse_response = frequency_impulse_response(magnitudes, hann_window, half_width_frames)
+    impulse_response = _frequency_impulse_response(magnitudes, hann_window, half_width_frames)
     
     return fft_convolve(audio, impulse_response)
     

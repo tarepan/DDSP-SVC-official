@@ -28,6 +28,8 @@ class Enhancer:
                 adaptive_key = 0,
                 silence_front = 0
                 ):
+        """Forward"""
+
         # enhancer start time 
         start_frame = int(silence_front * sample_rate / hop_size)
         real_silence_front = start_frame * hop_size / sample_rate

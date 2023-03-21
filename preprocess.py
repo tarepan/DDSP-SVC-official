@@ -45,8 +45,9 @@ def preprocess(path, f0_extractor, volume_extractor, units_encoder, sample_rate,
         # Unit :: NDArray
         units = units_encoder.encode(torch.from_numpy(audio).float().unsqueeze(0).to(device), sample_rate, hop_size).squeeze().to('cpu').numpy()
 
-        # fo :: NDArray
+        # fo :: NDArray - fo contour, unvoiced is expressed as fo=0
         f0 = f0_extractor.extract(audio, uv_interp = False)
+        # NOTE: V/UV information is intentionally discarded. Interesting!
         unvoiced = (f0 == 0)
         if len(f0[~unvoiced]) > 0:
             # contain voiced, so interpolate the unvoiced f0
