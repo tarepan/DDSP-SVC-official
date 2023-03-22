@@ -6,9 +6,13 @@ import numpy as np
 
 def upsample(signal, factor):
     """
+    Args:
+        signal (at least in CombSubFast, :: (B, Frame, 1))
+        factor :: 
     """
+    # (B, Frame, Feat) -> (B, Feat, Frame)
     signal = signal.permute(0, 2, 1)
-
+    # (B, Feat, Frame) & (B, Feat, 1) -> (B, Feat, Frame+1) -> (B, Feat, factor*Frame)
     signal = nn.functional.interpolate(torch.cat((signal,signal[:,:,-1:]),2), size=signal.shape[-1] * factor + 1, mode='linear', align_corners=True)
     signal = signal[:,:,:-1]
 

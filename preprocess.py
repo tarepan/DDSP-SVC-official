@@ -18,6 +18,10 @@ def parse_args(args=None, namespace=None):
 
 
 def preprocess(path, f0_extractor, volume_extractor, units_encoder, sample_rate, hop_size, device = 'cuda'):
+    """
+    Outputs:
+        volume :: (Frame,)
+    """
 
     # Directories
     path_srcdir     = os.path.join(path, 'audio')
@@ -36,13 +40,13 @@ def preprocess(path, f0_extractor, volume_extractor, units_encoder, sample_rate,
         path_volumefile = os.path.join(path_volumedir, binfile) # Path of preprocessed volume                    (.npy)
         path_skipfile   = os.path.join(path_skipdir,   file)    # Path to which audio is moved when all unvoiced (.wav)
 
-        # Audio :: NDArray
+        # Audio :: (T,)
         audio = librosa.load(path_srcfile, sr=sample_rate, mono=True)[0]
 
-        # Volume :: NDArray
+        # Volume :: (T,) -> (Frame,)
         volume = volume_extractor.extract(audio)
 
-        # Unit :: NDArray
+        # Unit :: (T,) -> (1, T) -> [encode] -> ? -> ()
         units = units_encoder.encode(torch.from_numpy(audio).float().unsqueeze(0).to(device), sample_rate, hop_size).squeeze().to('cpu').numpy()
 
         # fo :: NDArray - fo contour, unvoiced is expressed as fo=0

@@ -113,16 +113,13 @@ class AudioDataset(Dataset):
         for name in tqdm(self.paths, total=len(self.paths)):
             path_audio = os.path.join(self.path_root, 'audio', name) + '.wav'
 
-            # Duration of audio (always on device)
+            # Audio::(T,) / Unit::maybe(Frame, Feat) (if configured, on device)
+            audio  = torch.from_numpy(librosa.load(path_audio, sr=self.sample_rate, mono=True)[0]   ).float().to(device) if load_all_data else None
+            units  = torch.from_numpy(np.load(os.path.join(self.path_root, 'units',  name) + '.npy')).float().to(device) if load_all_data else None
+            # Duration::(1,) / fo::maybe(Frame, 1) / Volume::(Frame, 1) - always on device
             duration = librosa.get_duration(filename = path_audio, sr = self.sample_rate)
-            
-            # Audio/Unit (if configured, on device)
-            if load_all_data:
-                audio = torch.from_numpy(librosa.load(path_audio, sr=self.sample_rate, mono=True)[0]   ).float().to(device)
-                units = torch.from_numpy(np.load(os.path.join(self.path_root, 'units',  name) + '.npy')).float().to(device)
-            # fo/Volume (always on device)
-            f0        = torch.from_numpy(np.load(os.path.join(self.path_root, 'f0',     name) + '.npy')).float().unsqueeze(-1).to(device)
-            volume    = torch.from_numpy(np.load(os.path.join(self.path_root, 'volume', name) + '.npy')).float().unsqueeze(-1).to(device)
+            f0     = torch.from_numpy(np.load(os.path.join(self.path_root, 'f0',     name) + '.npy')).float().unsqueeze(-1).to(device)
+            volume = torch.from_numpy(np.load(os.path.join(self.path_root, 'volume', name) + '.npy')).float().unsqueeze(-1).to(device)
 
             # Speaker index :: (1,) (always on device)
             if n_spk is not None and n_spk > 1:
@@ -134,10 +131,7 @@ class AudioDataset(Dataset):
             spk_id = torch.LongTensor(np.array([spk_id])).to(device)
 
             # Pack
-            if load_all_data:
-                self.data_buffer[name] = { 'audio': audio, 'units': units, 'duration': duration, 'f0': f0, 'volume': volume, 'spk_id': spk_id, }
-            else:
-                self.data_buffer[name] = {                                 'duration': duration, 'f0': f0, 'volume': volume, 'spk_id': spk_id, }
+            self.data_buffer[name] = { 'audio': audio, 'units': units, 'duration': duration, 'f0': f0, 'volume': volume, 'spk_id': spk_id, }
 
     def __getitem__(self, file_idx):
         name = self.paths[file_idx]
@@ -150,6 +144,16 @@ class AudioDataset(Dataset):
         return self.get_data(name, data_buffer)
 
     def get_data(self, name, data_buffer):
+        """
+        Returns:
+            dict
+                audio  :: (T,)
+                f0     :: (Frame, 1) maybe - [Hz]
+                volume :: (Frame, 1)
+                units  :: (Frame, Feat) maybe
+                spk_id :: (1,)
+                name   :: - self.paths[file_idx]
+        """
 
         # Load
         audio  = data_buffer.get('audio') # nullable

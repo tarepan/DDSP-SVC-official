@@ -26,12 +26,14 @@ class F0_Extractor:
         """
         self.f0_extractor, self.sample_rate, self.hop_size, self.f0_min, self.f0_max = f0_extractor, sample_rate, hop_size, f0_min, f0_max
     
-    def extract(self, audio, uv_interp: bool = False, device = None, silence_front = 0): # audio: 1d numpy array
+    def extract(self, audio, uv_interp: bool = False, device = None, silence_front = 0):
         """
         Args:
-
+            audio :: (T,)
             uv_interp - Whether to interpolated fo==0 unvoiced region with voiced edge fo values
             device    - PyTorch device (only for 'crepe')
+        Returns:
+            f0 - [Hz]
         """
         # extractor start time
         n_frames = int(len(audio) // self.hop_size) + 1
@@ -52,12 +54,7 @@ class F0_Extractor:
 
         # dio - WORLD's DIO + stonemask by 'pyworld'
         elif self.f0_extractor == 'dio':
-            _f0, t = pw.dio(
-                audio.astype('double'), 
-                self.sample_rate, 
-                f0_floor = self.f0_min, 
-                f0_ceil = self.f0_max, 
-                channels_in_octave=2, 
+            _f0, t = pw.dio(audio.astype('double'), self.sample_rate, f0_floor = self.f0_min, f0_ceil = self.f0_max, channels_in_octave=2, 
                 frame_period = (1000 * self.hop_size / self.sample_rate))
             f0 = pw.stonemask(audio.astype('double'), _f0, t, self.sample_rate)
             f0 = np.pad(f0.astype('float'), (start_frame, n_frames - len(f0) - start_frame))
@@ -107,7 +104,15 @@ class Volume_Extractor:
     def __init__(self, hop_size = 512):
         self.hop_size = hop_size
         
-    def extract(self, audio): # audio: 1d numpy array
+    def extract(self, audio):
+        """
+        RMS of audio
+
+        Args:
+            audio  :: (T,)
+        Returns:
+            volume :: (Frame,)
+        """
         n_frames = int(len(audio) // self.hop_size) + 1
         audio2 = audio ** 2
         audio2 = np.pad(audio2, (int(self.hop_size // 2), int((self.hop_size + 1) // 2)), mode = 'reflect')
@@ -316,68 +321,67 @@ class CombSubFast(torch.nn.Module):
         print(' [DDSP Model] Combtooth Subtractive Synthesiser')
         # params
         self.register_buffer("sampling_rate", torch.tensor(sampling_rate))
-        self.register_buffer("block_size", torch.tensor(block_size))
-        self.register_buffer("window", torch.sqrt(torch.hann_window(2 * block_size)))
+        self.register_buffer("block_size",    torch.tensor(block_size))
+        self.register_buffer("window",        torch.sqrt(torch.hann_window(2 * block_size)))
         #Unit2Control
-        split_map = {
-            'harmonic_magnitude': block_size + 1, 
-            'harmonic_phase': block_size + 1,
-            'noise_magnitude': block_size + 1
-        }
-        self.unit2ctrl = Unit2Control(n_unit, n_spk, split_map)
+        self.unit2ctrl = Unit2Control(n_unit, n_spk, { 'harmonic_magnitude': block_size + 1, 'harmonic_phase': block_size + 1, 'noise_magnitude': block_size + 1, })
 
     def forward(self, units_frames, f0_frames, volume_frames, spk_id=None, spk_mix_dict=None, initial_phase=None, infer=True, **kwargs):
-        '''
-            units_frames: B x n_frames x n_unit
-            f0_frames: B x n_frames x 1
-            volume_frames: B x n_frames x 1 
-            spk_id: B x 1
+        '''aNN (conformer) + sDSP (SubHarmo + SubNoise + OLA)
+            units_frames  :: (B, Frame, Feat) maybe
+            f0_frames     :: (B, Frame, 1) maybe - Fundamental tone's frequency series [Hz]
+            volume_frames :: (B, Frame, 1) 
+            spk_id        :: (B, 1)
+
+            initial_phase - maybe [rad]
         '''
         # exciter phase
+        ## fo contour [hz] :: (B, Frame, 1) -> (B, T, 1)
         f0 = upsample(f0_frames, self.block_size)
-        if infer:
-            x = torch.cumsum(f0.double() / self.sampling_rate, axis=1)
-        else:
-            x = torch.cumsum(f0 / self.sampling_rate, axis=1)
+        _f0 = f0.double() if infer else f0
+        # Phase contour :: (B, T, 1) -> (B, T, 1) - [/sample]
+        x = torch.cumsum(_f0 / self.sampling_rate, axis=1)
         if initial_phase is not None:
             x += initial_phase.to(x) / 2 / np.pi    
         x = x - torch.round(x)
         x = x.to(f0)
-        
+        # :: (B, T, 1) -> (B, Frame, 1)
         phase_frames = 2 * np.pi * x[:, ::self.block_size, :]
         
         # parameter prediction
         ctrls = self.unit2ctrl(units_frames, f0_frames, phase_frames, volume_frames, spk_id=spk_id, spk_mix_dict=spk_mix_dict)
-        
-        src_filter = torch.exp(ctrls['harmonic_magnitude'] + 1.j * np.pi * ctrls['harmonic_phase'])
-        src_filter = torch.cat((src_filter, src_filter[:,-1:,:]), 1)
-        noise_filter= torch.exp(ctrls['noise_magnitude']) / 128
-        noise_filter = torch.cat((noise_filter, noise_filter[:,-1:,:]), 1)
-        
-        # combtooth exciter signal 
+
+        # exciter signals
+        ## combtooth - phase contour [Hz] / fo contour [Hz]
         combtooth = torch.sinc(self.sampling_rate * x / (f0 + 1e-3))
         combtooth = combtooth.squeeze(-1)     
         combtooth_frames = F.pad(combtooth, (self.block_size, self.block_size)).unfold(1, 2 * self.block_size, self.block_size)
         combtooth_frames = combtooth_frames * self.window
-        combtooth_fft = torch.fft.rfft(combtooth_frames, 2 * self.block_size)
-        
-        # noise exciter signal
+        ## noise
         noise = torch.rand_like(combtooth) * 2 - 1
         noise_frames = F.pad(noise, (self.block_size, self.block_size)).unfold(1, 2 * self.block_size, self.block_size)
         noise_frames = noise_frames * self.window
-        noise_fft = torch.fft.rfft(noise_frames, 2 * self.block_size)
-        
-        # apply the filters 
-        signal_fft = combtooth_fft * src_filter + noise_fft * noise_filter
 
-        # take the ifft to resynthesize audio.
-        signal_frames_out = torch.fft.irfft(signal_fft, 2 * self.block_size) * self.window
+        # filters - (maybe) transfer function H(ω)
+        ## harmo - H_h(ω) = exp(a + j*π*p)
+        _src_filter = torch.exp(ctrls['harmonic_magnitude'] + 1.j * np.pi * ctrls['harmonic_phase'])
+        src_filter = torch.cat((_src_filter, _src_filter[:,-1:,:]), 1)
+        ## noise - H_n(ω) = 1/128 * exp(x + 0j)
+        _noise_filter = torch.exp(ctrls['noise_magnitude']) / 128
+        noise_filter = torch.cat((_noise_filter, _noise_filter[:,-1:,:]), 1)
+
+        # apply the filters in frequency domain
+        combtooth_fft = torch.fft.rfft(combtooth_frames, 2 * self.block_size)
+        noise_fft     = torch.fft.rfft(noise_frames,     2 * self.block_size)
+        signal_fft = combtooth_fft * src_filter + noise_fft * noise_filter
+        signal_frames_out = torch.fft.irfft(signal_fft,  2 * self.block_size) * self.window
 
         # overlap add
         fold = torch.nn.Fold(output_size=(1, (signal_frames_out.size(1) + 1) * self.block_size), kernel_size=(1, 2 * self.block_size), stride=(1, self.block_size))
         signal = fold(signal_frames_out.transpose(1, 2))[:, 0, 0, self.block_size : -self.block_size]
 
         return signal, phase_frames, (signal, signal)
+
 
 class CombSub(torch.nn.Module):
     def __init__(self, 
