@@ -23,7 +23,7 @@ def parse_args(args=None, namespace=None):
     parser.add_argument("-id",   "--spk_id",          type=str, required=False, default=1,       help="speaker id (for multi-speaker model) | default: 1")
     parser.add_argument("-mix",  "--spk_mix_dict",    type=str, required=False, default="None",  help="mix-speaker dictionary (for multi-speaker model) | default: None")
     parser.add_argument("-k",    "--key",             type=str, required=False, default=0,       help="key changed (number of semitones) | default: 0")
-    parser.add_argument("-e",    "--enhance",         type=str, required=False, default='false', help="true or false | default: false")
+    parser.add_argument("-e",    "--enhance",         type=str, required=False, default='true',  help="true or false | default: true")
     parser.add_argument("-pe",   "--pitch_extractor", type=str, required=False, default='crepe', help="pitch extrator type: parselmouth, dio, harvest, crepe (default)")
     parser.add_argument("-fmin", "--f0_min",          type=str, required=False, default=50,      help="min f0 (Hz) | default: 50")
     parser.add_argument("-fmax", "--f0_max",          type=str, required=False, default=1100,    help="max f0 (Hz) | default: 1100")

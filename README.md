@@ -111,22 +111,21 @@ Pretrained model is provided in GitHub release.
 With provided model or your trained model, run:
 ```bash
 # Pure DDSP
-python main.py -i <input.wav> -m <model_file.pt> -o <output.wav> -k <keychange (semitones)> -id <speaker_id>
+python main.py -i <input.wav> -m <model_file.pt> -o <output.wav> -k <keychange (semitones)> -id <speaker_id> -e false
 
 # PPSP + enhancer
 ## if normal vocal range, set `enhancer_adaptive_key` to 0, else to >0
-python main.py -i <input.wav> -m <model_file.pt> -o <output.wav> -k <keychange (semitones)> -id <speaker_id> -e true -eak <enhancer_adaptive_key (semitones)>
+python main.py -i <input.wav> -m <model_file.pt> -o <output.wav> -k <keychange (semitones)> -id <speaker_id> -eak <enhancer_adaptive_key (semitones)>
 ```
 
 ```bash
-# other options about the f0 extractor and response threhold, see
 python main.py -h
 ```
 
 UPDATE：Mix-speaker is supported now. You can use "-mix" option to design your own vocal timbre, below is an example:
 ```bash
 # Mix the timbre of 1st and 2nd speaker in a 0.5 to 0.5 ratio
-python main.py -i <input.wav> -m <model_file.pt> -o <output.wav> -k <keychange (semitones)> -mix "{1:0.5, 2:0.5}" -e true -eak 0
+python main.py -i <input.wav> -m <model_file.pt> -o <output.wav> -k <keychange (semitones)> -mix "{1:0.5, 2:0.5}" -eak 0
 ```
 
 ## Results
