@@ -136,10 +136,13 @@ class Units_Encoder:
         self.encoder_sample_rate = encoder_sample_rate
         self.encoder_hop_size = encoder_hop_size
         
-    def encode(self, 
-                audio, # B, T
-                sample_rate,
-                hop_size): 
+    def encode(self, audio, sample_rate: int, hop_size: int):
+        """
+        Args:
+            audio :: (B, T) -
+            sample_rate     -
+            hop_size        -
+        """
         
         # resample
         if sample_rate == self.encoder_sample_rate:
@@ -150,7 +153,7 @@ class Units_Encoder:
                 self.resample_kernel[key_str] = Resample(sample_rate, self.encoder_sample_rate, lowpass_filter_width = 128).to(self.device)
             audio_res = self.resample_kernel[key_str](audio)
         
-        # encode
+        # encode :: (B, T) -> (B, T') -> (B, Frame, Feat)
         if audio_res.size(-1) < self.encoder_hop_size:
             audio_res = torch.nn.functional.pad(audio, (0, self.encoder_hop_size - audio_res.size(-1)))
         units = self.model(audio_res)
@@ -161,7 +164,8 @@ class Units_Encoder:
         index = torch.clamp(torch.round(ratio * torch.arange(n_frames).to(self.device)).long(), max = units.size(1) - 1)
         units_aligned = torch.gather(units, 1, index.unsqueeze(0).unsqueeze(-1).repeat([1, 1, units.size(-1)]))
         return units_aligned
-        
+
+
 class Audio2HubertSoft(torch.nn.Module):
     def __init__(self, path, h_sample_rate = 16000, h_hop_size = 320):
         super().__init__()
@@ -172,13 +176,13 @@ class Audio2HubertSoft(torch.nn.Module):
         consume_prefix_in_state_dict_if_present(checkpoint, "module.")
         self.hubert.load_state_dict(checkpoint)
         self.hubert.eval()
-     
-    def forward(self, 
-                audio): # B, T
-        with torch.inference_mode():  
-            units = self.hubert.units(audio.unsqueeze(1))
-            return units
-            
+
+    def forward(self, audio):
+        """ :: (B, T) -> (B, 1, T) -> (B, Frame, Feat=256) """
+        with torch.inference_mode():
+            return self.hubert.units(audio.unsqueeze(1))
+
+
 class DotDict(dict):
     def __getattr__(*args):         
         val = dict.get(*args)         

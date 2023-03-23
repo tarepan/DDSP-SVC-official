@@ -25,12 +25,8 @@ class Hubert(nn.Module):
         self.positional_embedding = PositionalConvEmbedding()
         self.norm = nn.LayerNorm(768)
         self.dropout = nn.Dropout(0.1)
-        self.encoder = TransformerEncoder(
-            nn.TransformerEncoderLayer(
-                768, 12, 3072, activation="gelu", batch_first=True
-            ),
-            12,
-        )
+        # Standard Transformer Encoder (12-layer, each 12-head attentions + 768->3072->768 FF)
+        self.encoder = TransformerEncoder(nn.TransformerEncoderLayer(768, 12, 3072, activation="gelu", batch_first=True), 12)
         self.proj = nn.Linear(768, 256)
 
         self.masked_spec_embed = nn.Parameter(torch.FloatTensor(768).uniform_())
@@ -43,14 +39,22 @@ class Hubert(nn.Module):
             x[mask] = self.masked_spec_embed.to(x.dtype)
         return x, mask
 
-    def encode(
-        self, x: torch.Tensor, layer: Optional[int] = None
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def encode(self, x: torch.Tensor, layer: Optional[int] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Args:
+            x :: (B, 1, T)        - Audio
+            layer                 - Yield transformer's intermediate output, not final output, if specified
+        Returns:
+              :: (B, Frame, Feat) - Unit series
+        """
+        # (B, 1, T) -> (B, Feat=512, Frame)
         x = self.feature_extractor(x)
+        # (B, Feat=512, Frame) -> (B, Frame, Feat=512) -> (B, Frame, Feat=768)
         x = self.feature_projection(x.transpose(1, 2))
         x, mask = self.mask(x)
         x = x + self.positional_embedding(x)
         x = self.dropout(self.norm(x))
+        # Transformer Encoder :: (B, Frame, Feat=768) -> (B, Frame, Feat=768)
         x = self.encoder(x, output_layer=layer)
         return x, mask
 
@@ -75,9 +79,9 @@ class HubertSoft(Hubert):
 
     @torch.inference_mode()
     def units(self, wav: torch.Tensor) -> torch.Tensor:
+        """:: (B, 1, T) -> (B, 1, T') -> (B, Frame, Feat=768) -> (B, Frame, Feat=256)"""
         wav = F.pad(wav, ((400 - 320) // 2, (400 - 320) // 2))
-        x, _ = self.encode(wav)
-        return self.proj(x)
+        return self.proj(self.encode(wav)[0])
 
 
 class HubertDiscrete(Hubert):
@@ -94,18 +98,20 @@ class HubertDiscrete(Hubert):
 
 
 class FeatureExtractor(nn.Module):
+    """Downsampling convolution stack, k10s5-[k3s2]x6"""
     def __init__(self):
         super().__init__()
-        self.conv0 = nn.Conv1d(1, 512, 10, 5, bias=False)
+        self.conv0 = nn.Conv1d(1,   512, 10, 5, bias=False)
         self.norm0 = nn.GroupNorm(512, 512)
-        self.conv1 = nn.Conv1d(512, 512, 3, 2, bias=False)
-        self.conv2 = nn.Conv1d(512, 512, 3, 2, bias=False)
-        self.conv3 = nn.Conv1d(512, 512, 3, 2, bias=False)
-        self.conv4 = nn.Conv1d(512, 512, 3, 2, bias=False)
-        self.conv5 = nn.Conv1d(512, 512, 2, 2, bias=False)
-        self.conv6 = nn.Conv1d(512, 512, 2, 2, bias=False)
+        self.conv1 = nn.Conv1d(512, 512,  3, 2, bias=False)
+        self.conv2 = nn.Conv1d(512, 512,  3, 2, bias=False)
+        self.conv3 = nn.Conv1d(512, 512,  3, 2, bias=False)
+        self.conv4 = nn.Conv1d(512, 512,  3, 2, bias=False)
+        self.conv5 = nn.Conv1d(512, 512,  2, 2, bias=False)
+        self.conv6 = nn.Conv1d(512, 512,  2, 2, bias=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """:: (B, 1, T) -> (B, Feat, Frame)"""
         x = F.gelu(self.norm0(self.conv0(x)))
         x = F.gelu(self.conv1(x))
         x = F.gelu(self.conv2(x))
@@ -124,6 +130,7 @@ class FeatureProjection(nn.Module):
         self.dropout = nn.Dropout(0.1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """(B, Frame, Feat=512) -> (B, Frame, Feat=768)"""
         x = self.norm(x)
         x = self.projection(x)
         x = self.dropout(x)
@@ -149,27 +156,30 @@ class PositionalConvEmbedding(nn.Module):
 
 
 class TransformerEncoder(nn.Module):
-    def __init__(
-        self, encoder_layer: nn.TransformerEncoderLayer, num_layers: int
-    ) -> None:
-        super(TransformerEncoder, self).__init__()
-        self.layers = nn.ModuleList(
-            [copy.deepcopy(encoder_layer) for _ in range(num_layers)]
-        )
+    """Stack of PyTorch's nn.TransformerEncoderLayer."""
+    def __init__(self, encoder_layer: nn.TransformerEncoderLayer, num_layers: int):
+        """
+        Args:
+            encoder_layer  :: (B, T, Feat) -> (B, T, Feat) - Layer instance, will be deepcopied (batch-first)
+            num_layers                                     - The number of layer
+        """
+        super().__init__()
+        self.layers = nn.ModuleList([copy.deepcopy(encoder_layer) for _ in range(num_layers)])
         self.num_layers = num_layers
 
-    def forward(
-        self,
-        src: torch.Tensor,
-        mask: torch.Tensor = None,
-        src_key_padding_mask: torch.Tensor = None,
-        output_layer: Optional[int] = None,
-    ) -> torch.Tensor:
+    def forward(self, src: torch.Tensor, mask: torch.Tensor = None, src_key_padding_mask: torch.Tensor = None, output_layer: Optional[int] = None) -> torch.Tensor:
+        """
+        Args:
+            src :: (B, T, Feat)  - Input
+            mask                 - (Config of encoder layer)
+            src_key_padding_mask - (Config of encoder layer)
+            output_layer         - Yield intermediate layer output, not final output, if specified
+        Returns:
+                :: (B, T, Feat)
+        """
         output = src
         for layer in self.layers[:output_layer]:
-            output = layer(
-                output, src_mask=mask, src_key_padding_mask=src_key_padding_mask
-            )
+            output = layer(output, src_mask=mask, src_key_padding_mask=src_key_padding_mask)
         return output
 
 
@@ -242,26 +252,6 @@ def hubert_discrete(
     if pretrained:
         checkpoint = torch.hub.load_state_dict_from_url(
             URLS["hubert-discrete"], progress=progress
-        )
-        consume_prefix_in_state_dict_if_present(checkpoint, "module.")
-        hubert.load_state_dict(checkpoint)
-        hubert.eval()
-    return hubert
-
-
-def hubert_soft(
-    pretrained: bool = True,
-    progress: bool = True,
-) -> HubertSoft:
-    r"""HuBERT-Soft from `"A Comparison of Discrete and Soft Speech Units for Improved Voice Conversion"`.
-    Args:
-        pretrained (bool): load pretrained weights into the model
-        progress (bool): show progress bar when downloading model
-    """
-    hubert = HubertSoft()
-    if pretrained:
-        checkpoint = torch.hub.load_state_dict_from_url(
-            URLS["hubert-soft"], progress=progress
         )
         consume_prefix_in_state_dict_if_present(checkpoint, "module.")
         hubert.load_state_dict(checkpoint)

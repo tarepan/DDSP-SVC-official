@@ -118,7 +118,7 @@ if __name__ == '__main__':
             start_frame = segment[0]
             seg_input = torch.from_numpy(segment[1]).float().unsqueeze(0).to(device)
             # Analysis
-            ## Unit
+            ## Unit :: -> (B, Frame, Feat)
             seg_units = units_encoder.encode(seg_input, sr_i, hop_size)
             ## fo/Volume
             seg_f0     =     f0[:, start_frame : start_frame + seg_units.size(1), :]
