@@ -144,6 +144,8 @@ class Units_Encoder:
             self.model = Audio2HubertBase(encoder_ckpt, device=device)
         elif encoder is 'contentvec':
             self.model = Audio2ContentVec(encoder_ckpt, device=device)
+        elif encoder is 'xunit':
+            self.model = Audio2XUnit(device=device)
         else:
             raise ValueError(f" [x] Unknown units encoder: {encoder}")
 
