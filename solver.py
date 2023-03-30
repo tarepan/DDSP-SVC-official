@@ -98,7 +98,7 @@ def train(args, initial_global_step, model, optimizer, loss_func, loader_train, 
             
             # forward/loss/Backward/Optim
             optimizer.zero_grad()
-            signal, _, _ = model(data['units'], data['f0'], data['volume'], data['spk_id'], infer=False)
+            signal, _, _ = model(data['units'].float(), data['f0'], data['volume'], data['spk_id'], infer=False)
             loss = loss_func(signal, data['audio'])
             loss.backward()
             optimizer.step()

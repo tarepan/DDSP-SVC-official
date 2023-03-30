@@ -57,7 +57,8 @@ def get_data_loaders(args, whole_audio=False):
         load_all_data=args.train.cache_all_data,
         whole_audio=whole_audio,
         n_spk=args.model.n_spk,
-        device=args.train.cache_device)
+        device=args.train.cache_device,
+        fp16=args.train.cache_fp16)
     loader_train = torch.utils.data.DataLoader(
         data_train ,
         batch_size=args.train.batch_size if not whole_audio else 1,
@@ -78,8 +79,7 @@ def get_data_loaders(args, whole_audio=False):
         data_valid,
         batch_size=1,
         shuffle=False,
-        num_workers=args.train.num_workers,
-        persistent_workers=(args.train.num_workers > 0),
+        num_workers=0,
         pin_memory=True
     )
     return loader_train, loader_valid 
@@ -94,7 +94,8 @@ class AudioDataset(Dataset):
         load_all_data: bool = True, # How many data loaded on device (True: all data, False: only light-weight items)
         whole_audio=False,          # Whether to use whole audio or w/ length clipping
         n_spk: int = 1,             # The number of speakers
-        device = 'cpu'              # Device on which cache data will be loaded
+        device = 'cpu',              # Device on which cache data will be loaded
+        fp16 = False,
     ):
         super().__init__()
         
@@ -129,6 +130,11 @@ class AudioDataset(Dataset):
             else:
                 spk_id = 1
             spk_id = torch.LongTensor(np.array([spk_id])).to(device)
+
+            # fp16
+            if fp16:
+                audio = audio.half()
+                units = units.half()
 
             # Pack
             self.data_buffer[name] = { 'audio': audio, 'units': units, 'duration': duration, 'f0': f0, 'volume': volume, 'spk_id': spk_id, }
