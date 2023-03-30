@@ -43,7 +43,7 @@ class F0_Extractor:
         real_silence_front = start_frame * self.hop_size / self.sample_rate
         audio = audio[int(np.round(real_silence_front * self.sample_rate)) : ]
 
-        # parselmouth by 'parselmouth'
+        # 'parselmouth' - parselmouth by `parselmouth`
         if self.f0_extractor == 'parselmouth':
             f0 = parselmouth.Sound(audio, self.sample_rate).to_pitch_ac(
                 time_step = self.hop_size / self.sample_rate, 
@@ -53,14 +53,14 @@ class F0_Extractor:
             pad_size = start_frame + (int(len(audio) // self.hop_size) - len(f0) + 1) // 2
             f0 = np.pad(f0,(pad_size, n_frames - len(f0) - pad_size))
 
-        # dio - WORLD's DIO + stonemask by 'pyworld'
+        # 'dio' - DIO + stonemask by `pyworld`
         elif self.f0_extractor == 'dio':
             _f0, t = pw.dio(audio.astype('double'), self.sample_rate, f0_floor = self.f0_min, f0_ceil = self.f0_max, channels_in_octave=2, 
                 frame_period = (1000 * self.hop_size / self.sample_rate))
             f0 = pw.stonemask(audio.astype('double'), _f0, t, self.sample_rate)
             f0 = np.pad(f0.astype('float'), (start_frame, n_frames - len(f0) - start_frame))
 
-        # harvest - WORLD's Harvest by 'pyworld'
+        # 'harvest' - Harvest by `pyworld`
         elif self.f0_extractor == 'harvest':
             f0, _ = pw.harvest(
                 audio.astype('double'), 
@@ -70,7 +70,7 @@ class F0_Extractor:
                 frame_period = (1000 * self.hop_size / self.sample_rate))
             f0 = np.pad(f0.astype('float'), (start_frame, n_frames - len(f0) - start_frame))
 
-        # crepe - CREPE by 'torchcrepe'
+        # 'crepe' - CREPE by 'torchcrepe'
         elif self.f0_extractor == 'crepe':
             if device is None:
                 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -103,44 +103,51 @@ class F0_Extractor:
 
 class Volume_Extractor:
     def __init__(self, hop_size = 512):
+        """
+        Args:
+            hop_size - Hop size defining RMS frame width
+        """
         self.hop_size = hop_size
         
     def extract(self, audio):
-        """
-        RMS of audio
-
-        Args:
-            audio  :: (T,)
-        Returns:
-            volume :: (Frame,)
-        """
+        """Extract non-overlapped RMS series from an audio :: (T,) -> (Frame,)"""
         n_frames = int(len(audio) // self.hop_size) + 1
+
+        # Padding for centering ...?
+        audio = np.pad(audio, (int(self.hop_size // 2), int((self.hop_size + 1) // 2)), mode = 'reflect')
+
+        # Sample-wise Square
         audio2 = audio ** 2
-        audio2 = np.pad(audio2, (int(self.hop_size // 2), int((self.hop_size + 1) // 2)), mode = 'reflect')
+        # Frame-wise Mean of Square
         volume = np.array([np.mean(audio2[int(n * self.hop_size) : int((n + 1) * self.hop_size)]) for n in range(n_frames)])
+        # Frame-wise Root of MeanSquare
         volume = np.sqrt(volume)
         return volume
-    
-         
+
+
 class Units_Encoder:
-    def __init__(self, encoder, encoder_ckpt, encoder_sample_rate = 16000, encoder_hop_size = 320, device = None):
+    def __init__(self, encoder: str, encoder_ckpt, encoder_sample_rate = 16000, encoder_hop_size = 320, device = None):
+        """
+        Args:
+            encoder             - Encoder type specifier
+            encoder_ckpt
+            encoder_sample_rate - Audio sampling rate of Encoder input
+            encoder_hop_size    - Hop size of encoder output relative to Encoder input audio
+        """
         if device is None:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.device = device
         
-        is_loaded_encoder = False
-        if encoder == 'hubertsoft':
+        if   encoder is 'hubertsoft':
             self.model = Audio2HubertSoft(encoder_ckpt).to(device)
-            is_loaded_encoder = True
-        if encoder == 'hubertbase':
+        elif encoder is 'hubertbase':
             self.model = Audio2HubertBase(encoder_ckpt, device=device)
-            is_loaded_encoder = True
-        if encoder == 'contentvec':
+        elif encoder is 'contentvec':
             self.model = Audio2ContentVec(encoder_ckpt, device=device)
-            is_loaded_encoder = True
-        if not is_loaded_encoder:
+        else:
             raise ValueError(f" [x] Unknown units encoder: {encoder}")
-            
+
+        # { f"{sample_rate}": Resample_instance}
         self.resample_kernel = {}
         self.encoder_sample_rate = encoder_sample_rate
         self.encoder_hop_size = encoder_hop_size
@@ -148,29 +155,36 @@ class Units_Encoder:
     def encode(self, audio, sample_rate: int, hop_size: int):
         """
         Args:
-            audio :: (B, T) -
-            sample_rate     -
-            hop_size        -
+            audio :: (B, T) - Input audio
+            sample_rate     - Input sampling rate
+            hop_size        - Desired hop size of unit relative to `audio`
+              in preprocess, `d.block_size`
+              in main, `args.data.block_size * sr_i_librosa / args.data.sampling_rate`
         """
-        
-        # resample
+
+        # Resample for encoder
         if sample_rate == self.encoder_sample_rate:
+            # pass
             audio_res = audio
         else:
             key_str = str(sample_rate)
+            # Resample instance
             if key_str not in self.resample_kernel:
                 self.resample_kernel[key_str] = Resample(sample_rate, self.encoder_sample_rate, lowpass_filter_width = 128).to(self.device)
+            # Resampling
             audio_res = self.resample_kernel[key_str](audio)
-        
-        # encode :: (B, T) -> (B, T') -> (B, Frame, Feat)
-        if audio_res.size(-1) < self.encoder_hop_size:
-            audio_res = torch.nn.functional.pad(audio, (0, self.encoder_hop_size - audio_res.size(-1)))
+
+        # wave-to-unit :: (B, T) -> (B, Frame, Feat)
         units = self.model(audio_res)
-        
-        # alignment
+
+        # alignment - align unit to audio (≠resampled)
         n_frames = audio.size(-1) // hop_size + 1
-        ratio = (hop_size / sample_rate) / (self.encoder_hop_size / self.encoder_sample_rate)
+        raw_unit_frame_period_sec = self.encoder_hop_size / self.encoder_sample_rate
+        target_unit_frame_period_sec = hop_size / sample_rate
+        ratio = target_unit_frame_period_sec / raw_unit_frame_period_sec
+        # [0, 1, 2, ... , N-1] -> 1.5 * [0, 1, 2, ... , N-1] -> (round&clip) -> [0, 2, 3, ...]
         index = torch.clamp(torch.round(ratio * torch.arange(n_frames).to(self.device)).long(), max = units.size(1) - 1)
+        #                                 FrameDim   (Frame) -> (1, Frame, UnitFrame)
         units_aligned = torch.gather(units, 1, index.unsqueeze(0).unsqueeze(-1).repeat([1, 1, units.size(-1)]))
         return units_aligned
 
@@ -377,11 +391,7 @@ class Sins(torch.nn.Module):
 
 
 class CombSubFast(torch.nn.Module):
-    def __init__(self, 
-            sampling_rate,
-            block_size,
-            n_unit=256,
-            n_spk=1):
+    def __init__(self, sampling_rate, block_size, n_unit=256, n_spk=1):
         super().__init__()
 
         print(' [DDSP Model] Combtooth Subtractive Synthesiser')
