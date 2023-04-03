@@ -103,15 +103,14 @@ class SvcDDSP:
         f0 = torch.from_numpy(f0).float().to(self.device).unsqueeze(-1).unsqueeze(0)
         f0 = f0 * 2 ** (float(pitch_adjust) / 12)
         
-        # extract volume
-        volume_extractor = Volume_Extractor(hop_size)
-        volume = volume_extractor.extract(audio)
-        mask = (volume > 10 ** (float(self.threhold) / 20)).astype('float')
+        ## volume extraction :: (T,) -> (B=1, Frame)
+        volume_np = Volume_Extractor(hop_size).extract(audio)
+        volume = torch.from_numpy(volume_np).float().to(self.device).unsqueeze(0)
+        mask = (volume_np > 10 ** (float(self.threhold) / 20)).astype('float')
         mask = np.pad(mask, (4, 4), constant_values=(mask[0], mask[-1]))
         mask = np.array([np.max(mask[n : n + 9]) for n in range(len(mask) - 8)])
         mask = torch.from_numpy(mask).float().to(self.device).unsqueeze(-1).unsqueeze(0)
         mask = upsample(mask, self.args.data.block_size).squeeze(-1)
-        volume = torch.from_numpy(volume).float().to(self.device).unsqueeze(-1).unsqueeze(0)
 
         # extract units
         audio_t = torch.from_numpy(audio).float().unsqueeze(0).to(self.device)

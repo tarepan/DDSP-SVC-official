@@ -77,15 +77,15 @@ if __name__ == '__main__':
     print('Pitch extractor type: ' + cmd.pitch_extractor)
     pitch_extractor = F0_Extractor(cmd.pitch_extractor, sr_i, hop_size, float(cmd.f0_min), float(cmd.f0_max))
     f0 = torch.from_numpy(pitch_extractor.extract(audio, uv_interp = True, device = device)).float().to(device).unsqueeze(-1).unsqueeze(0)
-    ## Volume 
-    volume_extractor = Volume_Extractor(hop_size)
-    volume = volume_extractor.extract(audio)
-    mask = (volume > 10 ** (float(cmd.threhold) / 20)).astype('float')
+    ## Volume :: (T,) -> (B=1, Frame)
+    volume_np = Volume_Extractor(hop_size).extract(audio)
+    volume = torch.from_numpy(volume_np).float().to(device).unsqueeze(0)
+    ## mask
+    mask = (volume_np > 10 ** (float(cmd.threhold) / 20)).astype('float')
     mask = np.pad(mask, (4, 4), constant_values=(mask[0], mask[-1]))
     mask = np.array([np.max(mask[n : n + 9]) for n in range(len(mask) - 8)])
     mask = torch.from_numpy(mask).float().to(device).unsqueeze(-1).unsqueeze(0)
     mask = upsample(mask, args.data.block_size).squeeze(-1)
-    volume = torch.from_numpy(volume).float().to(device).unsqueeze(-1).unsqueeze(0)
 
     # Modification
     ## fo - key change
@@ -122,7 +122,7 @@ if __name__ == '__main__':
             seg_units = units_encoder.encode(seg_input, sr_i, hop_size)
             ## fo/Volume
             seg_f0     =     f0[:, start_frame : start_frame + seg_units.size(1), :]
-            seg_volume = volume[:, start_frame : start_frame + seg_units.size(1), :]
+            seg_volume = volume[:, start_frame : start_frame + seg_units.size(1)]
             
             # Synthesis
             ## DDSP

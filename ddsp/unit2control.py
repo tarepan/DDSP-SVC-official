@@ -62,8 +62,8 @@ class Unit2Control(nn.Module):
             units  :: (B, Frame, Feat) - Acoustic unit series
             f0     :: (..., 1)         - Fundamental tone's frequency contour
             phase  :: (..., 1)         -
-            volume :: (..., 1)
-            spk_id :: (..., 1)
+            volume :: (B, Frame)
+            spk_id :: (B,)
             spk_mix_dict
         return: 
             dict of B x n_frames x feat
@@ -74,6 +74,7 @@ class Unit2Control(nn.Module):
 
         # Embedding
         ## Add continuous embeddings of fo/phase/volume to processed unit
+        volume = volume.unsqueeze(-1)
         x = x + self.f0_embed((1+ f0 / 700).log()) + self.phase_embed(phase / np.pi) + self.volume_embed(volume)
         ## Add discrete or mixed discrete embeddings of spk to others
         if spk_mix_dict is not None:

@@ -117,10 +117,10 @@ class AudioDataset(Dataset):
             # Audio::(T,) / Unit::maybe(Frame, Feat) (if configured, on device)
             audio  = torch.from_numpy(librosa.load(path_audio, sr=self.sample_rate, mono=True)[0]   ).float().to(device) if load_all_data else None
             units  = torch.from_numpy(np.load(os.path.join(self.path_root, 'units',  name) + '.npy')).float().to(device) if load_all_data else None
-            # Duration::(1,) / fo::maybe(Frame, 1) / Volume::(Frame, 1) - always on device
+            # Duration::(1,) / fo::maybe(Frame, 1) / Volume::(Frame,) - always on device
             duration = librosa.get_duration(filename = path_audio, sr = self.sample_rate)
             f0     = torch.from_numpy(np.load(os.path.join(self.path_root, 'f0',     name) + '.npy')).float().unsqueeze(-1).to(device)
-            volume = torch.from_numpy(np.load(os.path.join(self.path_root, 'volume', name) + '.npy')).float().unsqueeze(-1).to(device)
+            volume = torch.from_numpy(np.load(os.path.join(self.path_root, 'volume', name) + '.npy')).float().to(device)
 
             # Speaker index :: (1,) - always on device
             dir_name = os.path.dirname(name)
@@ -154,7 +154,7 @@ class AudioDataset(Dataset):
             dict
                 audio  :: (T,)
                 f0     :: (Frame, 1) maybe - [Hz]
-                volume :: (Frame, 1)
+                volume :: (Frame,)
                 units  :: (Frame, Feat) maybe
                 spk_id :: (1,)
                 name   :: - self.paths[file_idx]
