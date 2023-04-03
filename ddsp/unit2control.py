@@ -20,7 +20,7 @@ def split_to_dict(tensor, tensor_splits):
 
 
 class Unit2Control(nn.Module):
-    def __init__(self, input_channel, n_spk: int, output_splits):
+    def __init__(self, ndim_feat_i, n_spk: int, output_splits):
         """
         Args:
             input_channel - Feature dimension size of unit series
@@ -29,33 +29,38 @@ class Unit2Control(nn.Module):
         """
         super().__init__()
 
+        ndim_feat = 256
+        ndim_out = sum([v for _, v in output_splits.items()])
+
         # PreNet - Conv-GN-LReLU-Conv
         kernel = 3
-        self.stack = nn.Sequential(
-                nn.Conv1d(input_channel, 256, kernel, padding="same"),
-                nn.GroupNorm(4,          256),
-                nn.LeakyReLU(),
-                nn.Conv1d(256,           256, kernel, padding="same")) 
+        self.prenet = nn.Sequential(
+            nn.Conv1d(ndim_feat_i, ndim_feat, kernel, padding="same"),
+            nn.GroupNorm(4,        ndim_feat),
+            nn.LeakyReLU(),
+            nn.Conv1d(ndim_feat,   ndim_feat, kernel, padding="same")
+        )
 
         # Embedding
-        ndim_emb = 256
-        ## fo/phase/volume continuous embedding :: (*, 1) -> (*, Emb)
-        self.f0_embed     = nn.Linear(1, ndim_emb)
-        self.phase_embed  = nn.Linear(1, ndim_emb)
-        self.volume_embed = nn.Linear(1, ndim_emb)
-        ## spk discrete embedding :: (*, 1) -> (*, Emb)
-        self.spk_embed = nn.Embedding(n_spk, ndim_emb)
+        ## fo/phase/volume continuous embeddings :: (B, Frame, 1) -> (B, Frame, Emb)
+        ## spk             discrete   embedding  :: (B,)          -> (B, Emb)
+        self.f0_embed     =    nn.Linear(1,     ndim_feat)
+        self.phase_embed  =    nn.Linear(1,     ndim_feat)
+        self.volume_embed =    nn.Linear(1,     ndim_feat)
+        self.spk_embed    = nn.Embedding(n_spk, ndim_feat)
 
-        # Conformer
-        self.decoder = PCmer(num_layers=3, num_heads=8, dim_model=256, dim_keys=256, dim_values=256, residual_dropout=0.1, attention_dropout=0.1)
-        self.norm = nn.LayerNorm(256)
-        # PostNet - Linear
-        self.n_out = sum([v for _, v in output_splits.items()])
-        self.dense_out = weight_norm(nn.Linear(256, self.n_out))
+        # Conformer decoder & Linear postNet
+        self.dec_post = nn.Sequential(
+            PCmer(num_layers=3, num_heads=8, dim_model=ndim_feat, dim_keys=256, dim_values=256, residual_dropout=0.1, attention_dropout=0.1),
+            nn.LayerNorm(ndim_feat),
+            weight_norm(nn.Linear(ndim_feat, ndim_out)),
+        )
+
         # Output split
         self.output_splits = output_splits
 
-    def forward(self, units, f0, phase, volume, spk_id = None, spk_mix_dict = None):
+
+    def forward(self, units, f0, phase, volume, spk_id, spk_mix_dict = None):
         
         '''
         Args:
@@ -70,7 +75,7 @@ class Unit2Control(nn.Module):
         '''
 
         # PreNet :: (B, Frame, Feat) -> (B, Feat, Frame) -> (B, Feat, Frame) -> (B, Frame, Feat)
-        x = self.stack(units.transpose(1,2)).transpose(1,2)
+        x = self.prenet(units.transpose(1,2)).transpose(1,2)
 
         # Embedding
         ## Add continuous embeddings of fo/phase/volume to processed unit
@@ -87,8 +92,6 @@ class Unit2Control(nn.Module):
             x = x + self.spk_embed(spk_id - 1)
 
         # Conformer/PostNet
-        x = self.decoder(x)
-        x = self.norm(x)
-        e = self.dense_out(x)
+        e = self.dec_post(x)
 
         return split_to_dict(e, self.output_splits) 
