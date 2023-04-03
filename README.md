@@ -152,14 +152,3 @@ python main.py -i <input.wav> -m <model_file.pt> -o <output.wav> -k <keychange (
 
 [notebook]:https://colab.research.google.com/github/tarepan/DDSP-SVC-official/blob/main/ddspsvc.ipynb
 [demo page]:https://demo.project.your
-
-
-## HTTP Server and VST supported
-Start the server with the following command
-```bash
-# configs are in this python file, see the comments (Chinese only)
-python flask_api.py
-```
-Currently supported VST client:
-https://github.com/zhaohui8969/VST_NetProcess-
-

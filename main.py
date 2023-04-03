@@ -76,6 +76,7 @@ if __name__ == '__main__':
     ## fo
     print('Pitch extractor type: ' + cmd.pitch_extractor)
     pitch_extractor = F0_Extractor(cmd.pitch_extractor, sr_i, hop_size, float(cmd.f0_min), float(cmd.f0_max))
+    # NOTE: in flask_api.py, silence_front is used
     f0 = torch.from_numpy(pitch_extractor.extract(audio, uv_interp = True, device = device)).float().to(device).unsqueeze(-1).unsqueeze(0)
     ## Volume :: (T,) -> (B=1, Frame)
     volume_np = Volume_Extractor(hop_size).extract(audio)
@@ -109,6 +110,7 @@ if __name__ == '__main__':
         print('Enhancer type: none (using raw output of ddsp)')
 
     # forward and save the output
+    # NOTE: in flask_api.py, unit series are extracted at first as batch, then synth waveform at once.
     result = np.zeros(0)
     current_length = 0
     segments = split(audio, sr_i, hop_size)
