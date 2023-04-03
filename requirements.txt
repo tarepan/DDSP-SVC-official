@@ -18,3 +18,5 @@ tensorboard
 torchcrepe
 tqdm
 wave
+pysimplegui
+sounddevice
