@@ -6,7 +6,7 @@ import pyworld as pw
 import parselmouth
 import torchcrepe
 import resampy
-from fairseq import checkpoint_utils
+# from fairseq import checkpoint_utils
 from encoder.hubert.model import HubertSoft
 import torch.nn.functional as F
 from torch.nn.modules.utils import consume_prefix_in_state_dict_if_present

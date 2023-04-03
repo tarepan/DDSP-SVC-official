@@ -1,5 +1,5 @@
 einops
-fairseq
+# fairseq
 flask
 flask_cors
 gin
