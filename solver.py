@@ -36,7 +36,7 @@ def test(args, model, loss_func, loader_test, saver):
                     data[k] = data[k].to(args.device)
             print('>>', data['name'][0])
             audio_gt = data['audio']
-            # forward
+            # Reconstruction forward
             st_time = time.time()
             audio_pred, _, _ = model(data['units'], data['f0'], data['volume'], data['spk_id'])
             ed_time = time.time()

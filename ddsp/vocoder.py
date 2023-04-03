@@ -138,13 +138,13 @@ class Units_Encoder:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.device = device
         
-        if   encoder is 'hubertsoft':
+        if   encoder == 'hubertsoft':
             self.model = Audio2HubertSoft(encoder_ckpt).to(device)
-        elif encoder is 'hubertbase':
+        elif encoder == 'hubertbase':
             self.model = Audio2HubertBase(encoder_ckpt, device=device)
-        elif encoder is 'contentvec':
+        elif encoder == 'contentvec':
             self.model = Audio2ContentVec(encoder_ckpt, device=device)
-        elif encoder is 'xunit':
+        elif encoder == 'xunit':
             self.model = Audio2XUnit(device=device)
         else:
             raise ValueError(f" [x] Unknown units encoder: {encoder}")
@@ -179,15 +179,16 @@ class Units_Encoder:
         # wave-to-unit :: (B, T) -> (B, Frame, Feat)
         units = self.model(audio_res)
 
-        # alignment - align unit to audio (≠resampled)
+        # alignment - Nearest interpolation (align unit to audio (≠resampled))
+        ## There is no grantee of well-shaped unit space, so use nearest
         n_frames = audio.size(-1) // hop_size + 1
         raw_unit_frame_period_sec = self.encoder_hop_size / self.encoder_sample_rate
         target_unit_frame_period_sec = hop_size / sample_rate
         ratio = target_unit_frame_period_sec / raw_unit_frame_period_sec
         # [0, 1, 2, ... , N-1] -> 1.5 * [0, 1, 2, ... , N-1] -> (round&clip) -> [0, 2, 3, ...]
-        index = torch.clamp(torch.round(ratio * torch.arange(n_frames).to(self.device)).long(), max = units.size(1) - 1)
-        #                                 FrameDim   (Frame) -> (1, Frame, UnitFrame)
-        units_aligned = torch.gather(units, 1, index.unsqueeze(0).unsqueeze(-1).repeat([1, 1, units.size(-1)]))
+        frame_index = torch.clamp(torch.round(ratio * torch.arange(n_frames).to(self.device)).long(), max = units.size(1) - 1)
+        #                                 FrameDim   (Frame) -> (1, Frame, Feat)
+        units_aligned = torch.gather(units, 1, frame_index.unsqueeze(0).unsqueeze(-1).repeat([1, 1, units.size(-1)]))
         return units_aligned
 
 

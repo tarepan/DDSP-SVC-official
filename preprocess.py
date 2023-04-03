@@ -47,7 +47,7 @@ def preprocess(path, f0_extractor, volume_extractor, units_encoder, sample_rate,
         # Volume :: (T,) -> (Frame,)
         volume = volume_extractor.extract(audio)
 
-        # Unit :: (T,) -> (1, T) -> [encode] -> (B=1, Frame, Feat) -> (Frame, Feat)
+        # Unit :: (T,) -> (B=1, T) -> [encode] -> (B=1, Frame, Feat) -> (Frame, Feat)
         units = units_encoder.encode(torch.from_numpy(audio).float().unsqueeze(0).to(device), sample_rate, hop_size).squeeze().to('cpu').numpy()
 
         # fo :: NDArray - fo contour, unvoiced is expressed as fo=0
