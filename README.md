@@ -81,9 +81,6 @@ python preprocess.py -c <seletct_config_as___configs/combsub.yaml>
 - Configs
   - sampling rate: 44.1khz
   - commons: optimized for NVIDIA GTX 1660
-  - 'n_spk'
-    - `1`: single-speaker model
-    - `2` or more: multi-speaker model
 - Restrictions
   - assert 'audio_sr == config_sr'. If not, training becomes very slow by resampling.
   - assert '2sec <= len(audio) <= not_too_long'

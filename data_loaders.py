@@ -122,13 +122,12 @@ class AudioDataset(Dataset):
             f0     = torch.from_numpy(np.load(os.path.join(self.path_root, 'f0',     name) + '.npy')).float().unsqueeze(-1).to(device)
             volume = torch.from_numpy(np.load(os.path.join(self.path_root, 'volume', name) + '.npy')).float().unsqueeze(-1).to(device)
 
-            # Speaker index :: (1,) (always on device)
-            if n_spk is not None and n_spk > 1:
-                spk_id = int(os.path.dirname(name)) if str.isdigit(os.path.dirname(name)) else 0
-                if spk_id < 1 or spk_id > n_spk:
-                    raise ValueError(' [x] Muiti-speaker traing error : spk_id must be an integer within [1, n_spk]')
-            else:
-                spk_id = 1
+            # Speaker index :: (1,) - always on device
+            dir_name = os.path.dirname(name)
+            assert str.isdigit(dir_name), f"Directory name should be positive integer, but set to '{dir_name}'"
+            spk_id = int(dir_name)
+            if spk_id < 1 or n_spk < spk_id:
+                raise ValueError(' [x] spk_id (derived from directory name) must be an integer within [1, n_spk]')
             spk_id = torch.LongTensor(np.array([spk_id])).to(device)
 
             # fp16

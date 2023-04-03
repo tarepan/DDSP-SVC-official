@@ -14,7 +14,10 @@ data:
   valid_path: data/val # Create a folder named "audio" under this path and put the audio clip in it
 model:
   type: 'CombSubFast'
-  n_spk: 1 # max number of different speakers
+
+
+
+  n_spk: 100
 enhancer:
     type: 'nsf-hifigan'
     ckpt: 'pretrain/nsf_hifigan/model'

@@ -20,11 +20,11 @@ def split_to_dict(tensor, tensor_splits):
 
 
 class Unit2Control(nn.Module):
-    def __init__(self, input_channel, n_spk, output_splits):
+    def __init__(self, input_channel, n_spk: int, output_splits):
         """
         Args:
             input_channel - Feature dimension size of unit series
-            n_spk
+            n_spk         - The number of speakers
             output_splits - Output shape specifier
         """
         super().__init__()
@@ -43,10 +43,8 @@ class Unit2Control(nn.Module):
         self.f0_embed     = nn.Linear(1, ndim_emb)
         self.phase_embed  = nn.Linear(1, ndim_emb)
         self.volume_embed = nn.Linear(1, ndim_emb)
-        self.n_spk = n_spk
         ## spk discrete embedding :: (*, 1) -> (*, Emb)
-        if n_spk is not None and n_spk > 1:
-            self.spk_embed = nn.Embedding(n_spk, ndim_emb)
+        self.spk_embed = nn.Embedding(n_spk, ndim_emb)
 
         # Conformer
         self.decoder = PCmer(num_layers=3, num_heads=8, dim_model=256, dim_keys=256, dim_values=256, residual_dropout=0.1, attention_dropout=0.1)
@@ -78,20 +76,17 @@ class Unit2Control(nn.Module):
         ## Add continuous embeddings of fo/phase/volume to processed unit
         x = x + self.f0_embed((1+ f0 / 700).log()) + self.phase_embed(phase / np.pi) + self.volume_embed(volume)
         ## Add discrete or mixed discrete embeddings of spk to others
-        if self.n_spk is not None and self.n_spk > 1:
-            if spk_mix_dict is not None:
-                # Speaker mixing - weighted sum of each speaker's embeddings
-                for k, v in spk_mix_dict.items():
-                    spk_id_tensor = torch.LongTensor(np.array([[k]])).to(units.device)
-                    x = x + v * self.spk_embed(spk_id_tensor - 1)
-            else:
-                # Speaker embedding
-                x = x + self.spk_embed(spk_id - 1)
+        if spk_mix_dict is not None:
+            # Speaker mixing - weighted sum of each speaker's embeddings
+            for k, v in spk_mix_dict.items():
+                spk_id_tensor = torch.LongTensor(np.array([[k]])).to(units.device)
+                x = x + v * self.spk_embed(spk_id_tensor - 1)
+        else:
+            # Speaker embedding
+            x = x + self.spk_embed(spk_id - 1)
 
-        # Conformer
+        # Conformer/PostNet
         x = self.decoder(x)
-
-        # PostNet
         x = self.norm(x)
         e = self.dense_out(x)
 
