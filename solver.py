@@ -40,6 +40,9 @@ def test(args, model, loss_func, loader_test, saver):
             st_time = time.time()
             audio_pred, _, _ = model(data['units'], data['f0'], data['volume'], data['spk_id'])
             ed_time = time.time()
+            # # VC forward
+            # # TODO: implementaion
+            # audio_vc, _, _ = model(data['units'], data['f0'], data['volume'], data['spk_id'])
 
             # crop
             min_len = np.min([audio_pred.shape[1], audio_gt.shape[1]])

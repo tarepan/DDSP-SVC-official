@@ -52,8 +52,10 @@ def preprocess(path, f0_extractor, volume_extractor, units_encoder, sample_rate,
 
         # fo :: NDArray - fo contour, unvoiced is expressed as fo=0
         f0 = f0_extractor.extract(audio, uv_interp = False)
-        # NOTE: V/UV information is intentionally discarded. Interesting!
         unvoiced = (f0 == 0)
+        # fo stats
+        # TODO: implementation
+        # NOTE: V/UV information is intentionally discarded. Interesting!
         if len(f0[~unvoiced]) > 0:
             # contain voiced, so interpolate the unvoiced f0
             f0[unvoiced] = np.interp(np.where(unvoiced)[0], np.where(~unvoiced)[0], f0[~unvoiced])
@@ -78,6 +80,7 @@ def preprocess(path, f0_extractor, volume_extractor, units_encoder, sample_rate,
     for file in tqdm(filelist, total=len(filelist)):
         process(file)
 
+    # TODO: implement stats per spk
 
 if __name__ == '__main__':
 
