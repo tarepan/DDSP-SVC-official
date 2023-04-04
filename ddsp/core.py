@@ -8,11 +8,12 @@ def upsample(signal, factor):
     """
     Args:
         signal (at least in CombSubFast, :: (B, Frame, 1))
-        factor :: 
+        factor :: - Scale factor
     """
     # (B, Frame, Feat) -> (B, Feat, Frame)
     signal = signal.permute(0, 2, 1)
-    # (B, Feat, Frame) & (B, Feat, 1) -> (B, Feat, Frame+1) -> (B, Feat, factor*Frame)
+
+    # (B, Feat, Frame) & (B, Feat, 1) -> (B, Feat, Frame+1) -> (B, Feat, factor*Frame+1) -> (B, Feat, factor*Frame)
     signal = nn.functional.interpolate(torch.cat((signal,signal[:,:,-1:]),2), size=signal.shape[-1] * factor + 1, mode='linear', align_corners=True)
     signal = signal[:,:,:-1]
 
@@ -25,6 +26,75 @@ def remove_above_fmax(amplitudes, pitch, fmax, level_start=1):
     pitches = pitch * torch.arange(level_start, n_harm + level_start).to(pitch)
     aa = (pitches < fmax).float() + 1e-7
     return amplitudes * aa
+
+
+def fo_to_rot(fo, sr: int, initial_phase = None, precise: bool = False):
+    """
+    Args:
+        fo            :: (B, T) - Instantaneous frequency series [Hz]
+        initial_phase :: (B,)   - Initial phase [rad]
+    Returns:
+        rot           :: (B, T) - Wrapped rotation [・], within range (-0.5, 0.5]
+    """
+    # Convert to fp64 for smaller numerial error
+    _fo = fo.double() if precise else fo
+
+    # fo to rotation by norm + cumsum + init + wrapping
+    rot = torch.cumsum(_fo / sr, axis=1)
+    if initial_phase is not None:
+        rot += initial_phase.unsqueeze(-1).to(rot) / 2 / np.pi
+    rot = rot - torch.round(rot)
+
+    # Back from fp64
+    rot = rot.to(fo)
+
+    return rot
+
+
+def test_fo_to_rot_dtype():
+    fo = torch.tensor([[1.0, 1.0, 1.0,]])
+    rot_np = fo_to_rot(fo, 1, precise=False)
+    rot_p  = fo_to_rot(fo, 1, precise=True)
+    assert fo.dtype == rot_np.dtype, f"{fo.dtype} != {rot_np.dtype}"
+    assert fo.dtype == rot_p.dtype, f"{fo.dtype} != {rot_p.dtype}"
+
+
+def test_fo_to_rot_stablefo():
+    fo_contour = torch.tensor([[ 1.0,   1.0,   1.0, ]])
+    sr = 4
+    rot_gt     = torch.tensor([[+0.25, +0.50, -0.25,]])
+    rot_calc   = fo_to_rot(fo_contour, sr, initial_phase=None, precise=False)
+    assert torch.allclose(rot_gt, rot_calc), f"{rot_gt} != {rot_calc}"
+    
+
+def test_fo_to_rot_fm():
+    fo_contour = torch.tensor([[ 1.0,   2.0,   3.0, ]])
+    sr = 4
+    # rot_gt   = torch.tensor([[+0.25, +0.75, +1.50,]])
+    rot_gt     = torch.tensor([[+0.25, -0.25, -0.50,]])
+    rot_calc   = fo_to_rot(fo_contour, sr, initial_phase=None, precise=False)
+    assert torch.allclose(rot_gt, rot_calc), f"{rot_gt} != {rot_calc}"
+
+
+def test_fo_to_rot_init_phase():
+    import math
+    fo_contour = torch.tensor([[ 1.0,   1.0,   1.0, ]])
+    init_phase = torch.tensor([1.0 * math.pi,])
+    sr = 4
+    # rot_gt   = torch.tensor([[+0.75, +1.00, +1.25,]])
+    rot_gt     = torch.tensor([[-0.25, +0.00, +0.25,]])
+    rot_calc   = fo_to_rot(fo_contour, sr, initial_phase=init_phase, precise=False)
+    assert torch.allclose(rot_gt, rot_calc), f"{rot_gt} != {rot_calc}"
+
+
+def test_fo_to_rot_fm_init_batch():
+    import math
+    fo_contour = torch.tensor([[ 1.0,   1.0,   1.0, ], [ 1.0,   2.0,   3.0, ],])
+    init_phase = torch.tensor([  1.0 * math.pi       ,   0.0                 ,])
+    sr = 4
+    rot_gt     = torch.tensor([[-0.25, +0.00, +0.25,], [+0.25, -0.25, -0.50,],])
+    rot_calc   = fo_to_rot(fo_contour, sr, initial_phase=init_phase, precise=True)
+    assert torch.allclose(rot_gt, rot_calc, atol=1e-05), f"{rot_gt} != {rot_calc}"
 
 
 #### Filter #######################################################################################

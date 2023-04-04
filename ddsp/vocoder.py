@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from torch.nn.modules.utils import consume_prefix_in_state_dict_if_present
 from torchaudio.transforms import Resample
 from .unit2control import Unit2Control
-from .core import frequency_filter, upsample, remove_above_fmax
+from .core import fo_to_rot, frequency_filter, upsample, remove_above_fmax
 
 
 class F0_Extractor:
@@ -320,14 +320,7 @@ def load_model(
 
 
 class Sins(torch.nn.Module):
-    def __init__(self, 
-            sampling_rate,
-            block_size,
-            n_harmonics,
-            n_mag_allpass,
-            n_mag_noise,
-            n_unit=256,
-            n_spk=1):
+    def __init__(self, sampling_rate, block_size, n_harmonics, n_mag_allpass, n_mag_noise, n_unit=256, n_spk=1):
         super().__init__()
         print(' [DDSP Model] Sinusoids Additive Synthesiser')
 
@@ -341,24 +334,16 @@ class Sins(torch.nn.Module):
             f0_frames     :: (B, Frame, 1)
             volume_frames :: (B, Frame)       - Frame-wise volume contour (non-overlapped RMS of the waveform)
             spk_id        :: (B,)             - Speaker index
-        '''
-        # Sample-wise frequency contour :: (B, Frame, Feat=1) -> (B, T)
-        f0 = upsample(f0_frames, self.block_size).squeeze(-1)
 
-        # phase contour :: (B, T)
-        _f0 = f0.double() if infer else f0
-        x = torch.cumsum(_f0 / self.sampling_rate, axis=1)
-        if initial_phase is not None:
-            initial_phase = initial_phase.squeeze(-1)
-            x += initial_phase.to(x) / 2 / np.pi    
-        x = x - torch.round(x)
-        x = x.to(f0)
-        phase = 2 * np.pi * x
+            initial_phase :: (B,)             - Initial phase [rad] (not used now)
+        '''
+        # Sample/Frame-wise frequency contour [Hz] & phase contour [rad] :: (B, T) | (B, Frame)
+        f0 = upsample(f0_frames, self.block_size).squeeze(-1)
+        phase = 2 * np.pi * fo_to_rot(f0, self.sampling_rate, initial_phase, infer)
         phase_frames = phase[:, ::self.block_size]
-        
+
         # parameter prediction
         ctrls = self.unit2ctrl(units_frames, f0_frames, phase_frames, volume_frames, spk_id, spk_mix_dict=spk_mix_dict)
-        
         amplitudes_frames =    torch.exp(ctrls['amplitudes']) / 128
         group_delay = np.pi * torch.tanh(ctrls['group_delay'])
         noise_param =          torch.exp(ctrls['noise_magnitude']) / 128
@@ -405,27 +390,20 @@ class CombSubFast(torch.nn.Module):
             volume_frames :: (B, Frame)          - Frame-wise volume contour (non-overlapped RMS of the waveform)
             spk_id        :: (B,)                - Speaker index
 
-            initial_phase - maybe [rad]
+            initial_phase :: (B,)             - Initial phase [rad] (not used now)
         '''
-        # fo contour [hz] :: (B, Frame, Feat=1) -> (B, T) - sample-wise contour
+        # Sample/Frame-wise frequency contour [Hz] & rotation contour [・] & phase contour [rad] :: (B, T) | (B, Frame)
         f0 = upsample(f0_frames, self.block_size).squeeze(-1)
-
-        # Phase contour [rad] :: (B, T, Feat=1) -> (B, Frame) - frame-wise contour by cumsum + wrapping + sample2frame
-        _f0 = f0.double() if infer else f0
-        x = torch.cumsum(_f0 / self.sampling_rate, axis=1)
-        if initial_phase is not None:
-            initial_phase = initial_phase.squeeze(-1)
-            x += initial_phase.to(x) / 2 / np.pi
-        x = x - torch.round(x)
-        phase = x.to(f0)
-        phase_frames = 2 * np.pi * phase[:, ::self.block_size]
+        rot = fo_to_rot(f0, self.sampling_rate, initial_phase, infer)
+        phase_frames = 2 * np.pi * rot[:, ::self.block_size]
 
         # parameter prediction
         ctrls = self.unit2ctrl(units_frames, f0_frames, phase_frames, volume_frames, spk_id, spk_mix_dict=spk_mix_dict)
+        harmo_mag, harmo_phase, noise_mag = ctrls['harmonic_magnitude'], ctrls['harmonic_phase'], ctrls['noise_magnitude']
 
         # exciter signals
         ## combtooth - phase contour [Hz] / fo contour [Hz]
-        combtooth = torch.sinc(self.sampling_rate * phase / (f0 + 1e-3))
+        combtooth = torch.sinc(self.sampling_rate * rot / (f0 + 1e-3))
         combtooth_frames = F.pad(combtooth, (self.block_size, self.block_size)).unfold(1, 2 * self.block_size, self.block_size)
         combtooth_frames = combtooth_frames * self.window
         ## noise
@@ -435,10 +413,10 @@ class CombSubFast(torch.nn.Module):
 
         # filters - (maybe) transfer function H(ω)
         ## harmo - H_h(ω) = exp(a + j*π*p)
-        _src_filter = torch.exp(ctrls['harmonic_magnitude'] + 1.j * np.pi * ctrls['harmonic_phase'])
+        _src_filter = torch.exp(harmo_mag + 1.j * np.pi * harmo_phase)
         src_filter = torch.cat((_src_filter, _src_filter[:,-1:,:]), 1)
         ## noise - H_n(ω) = 1/128 * exp(x + 0j)
-        _noise_filter = torch.exp(ctrls['noise_magnitude']) / 128
+        _noise_filter = torch.exp(noise_mag) / 128
         noise_filter = torch.cat((_noise_filter, _noise_filter[:,-1:,:]), 1)
 
         # apply the filters in frequency domain
@@ -455,14 +433,7 @@ class CombSubFast(torch.nn.Module):
 
 
 class CombSub(torch.nn.Module):
-    def __init__(self, 
-            sampling_rate,
-            block_size,
-            n_mag_allpass,
-            n_mag_harmonic,
-            n_mag_noise,
-            n_unit=256,
-            n_spk=1):
+    def __init__(self, sampling_rate, block_size, n_mag_allpass, n_mag_harmonic, n_mag_noise, n_unit=256, n_spk=1):
         super().__init__()
         print(' [DDSP Model] Combtooth Subtractive Synthesiser (Old Version)')
 
@@ -477,22 +448,13 @@ class CombSub(torch.nn.Module):
             volume_frames :: (B, Frame)       - Frame-wise volume contour (non-overlapped RMS of the waveform)
             spk_id        :: (B,)             - Speaker index
             spk_mix_dict
-            initial_phase
+            initial_phase :: (B,)             - Initial phase [rad] (not used now)
             infer
         '''
-        # exciter phase
+        # Sample/Frame-wise frequency contour [Hz] & rotation contour [・] & phase contour [rad] :: (B, T) | (B, Frame)
         f0 = upsample(f0_frames, self.block_size).squeeze(-1)
-        # 2pi * f0 [rad/s] / sr [sample/s] = [rad/sample]
-        _f0 = f0.double() if infer else f0
-        x = torch.cumsum(_f0 / self.sampling_rate, axis=1)
-        if initial_phase is not None:
-            initial_phase = initial_phase.squeeze(-1)
-            x += initial_phase.to(x) / 2 / np.pi
-        x = x - torch.round(x)
-        phase = x.to(f0)
-        
-        # phase at each frame's start
-        phase_frames = 2 * np.pi * phase[:, ::self.block_size]
+        rot = fo_to_rot(f0, self.sampling_rate, initial_phase, infer)
+        phase_frames = 2 * np.pi * rot[:, ::self.block_size]
         
         # parameter prediction
         ctrls = self.unit2ctrl(units_frames, f0_frames, phase_frames, volume_frames, spk_id, spk_mix_dict=spk_mix_dict)
@@ -513,18 +475,13 @@ class CombSub(torch.nn.Module):
                                                       |
                                                 rand -
         """
-        # combtooth exciter signal 
-        combtooth = torch.sinc(self.sampling_rate * phase / (f0 + 1e-3))
-
-        # harmonic part filter (using dynamic-windowed LTV-FIR, with group-delay prediction)
+        # SubHarmo (dynamic-windowed LTV-FIR, with group-delay prediction)
+        combtooth = torch.sinc(self.sampling_rate * rot / (f0 + 1e-3))
         harmonic = frequency_filter(combtooth, torch.exp(1.j * torch.cumsum(group_delay, axis = -1)), hann_window = False)
-        harmonic = frequency_filter(
-                        harmonic,
-                        torch.complex(src_param, torch.zeros_like(src_param)),
-                        hann_window = True,
-                        half_width_frames = 1.5 * self.sampling_rate / (f0_frames + 1e-3))
+        harmonic = frequency_filter(harmonic,  torch.complex(src_param, torch.zeros_like(src_param)), hann_window = True,
+                                                        half_width_frames = 1.5 * self.sampling_rate / (f0_frames + 1e-3))
 
-        # noise part filter (using constant-windowed LTV-FIR, without group-delay)
+        # SubNoise (constant-windowed LTV-FIR, without group-delay)
         noise = torch.rand_like(harmonic) * 2 - 1
         noise = frequency_filter(noise, torch.complex(noise_param, torch.zeros_like(noise_param)), hann_window = True)
                         
