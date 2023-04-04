@@ -337,26 +337,24 @@ class Sins(torch.nn.Module):
 
     def forward(self, units_frames, f0_frames, volume_frames, spk_id, spk_mix_dict=None, initial_phase=None, infer=True, max_upsample_dim=32):
         '''
-            units_frames  :: (B, Frame, Feat)
+            units_frames  :: (B, Frame, Feat) - Unit series
             f0_frames     :: (B, Frame, 1)
-            volume_frames :: (B, Frame)
-            spk_id        :: (B,)
+            volume_frames :: (B, Frame)       - Frame-wise volume contour (non-overlapped RMS of the waveform)
+            spk_id        :: (B,)             - Speaker index
         '''
-        # exciter phase
-        ## frequency contour
-        f0 = upsample(f0_frames, self.block_size)
+        # Sample-wise frequency contour :: (B, Frame, Feat=1) -> (B, T)
+        f0 = upsample(f0_frames, self.block_size).squeeze(-1)
+
+        # phase contour :: (B, T)
         _f0 = f0.double() if infer else f0
-        ## phase contour, t=0 is 0
         x = torch.cumsum(_f0 / self.sampling_rate, axis=1)
-        ## phase contour, init_phase adjusted
         if initial_phase is not None:
+            initial_phase = initial_phase.squeeze(-1)
             x += initial_phase.to(x) / 2 / np.pi    
-        ## (maybe) phase wrapping
         x = x - torch.round(x)
         x = x.to(f0)
         phase = 2 * np.pi * x
-        ## phase at each frame's start
-        phase_frames = phase[:, ::self.block_size, :]
+        phase_frames = phase[:, ::self.block_size]
         
         # parameter prediction
         ctrls = self.unit2ctrl(units_frames, f0_frames, phase_frames, volume_frames, spk_id, spk_mix_dict=spk_mix_dict)
@@ -373,7 +371,7 @@ class Sins(torch.nn.Module):
         for n in range(( n_harmonic - 1) // max_upsample_dim + 1):
             start = n * max_upsample_dim
             end = (n + 1) * max_upsample_dim
-            phases = phase * level_harmonic[start:end]
+            phases = phase.unsqueeze(-1) * level_harmonic[start:end]
             amplitudes = upsample(amplitudes_frames[:,:,start:end], self.block_size)
             # A * sin(phase)
             sinusoids += (amplitudes * torch.sin(phases)).sum(-1)
@@ -387,7 +385,7 @@ class Sins(torch.nn.Module):
                         
         signal = harmonic + noise
 
-        return signal, phase, (harmonic, noise) #, (noise_param, noise_param)
+        return signal, phase.unsqueeze(-1), (harmonic, noise)
 
 
 class CombSubFast(torch.nn.Module):
@@ -402,33 +400,32 @@ class CombSubFast(torch.nn.Module):
 
     def forward(self, units_frames, f0_frames, volume_frames, spk_id, spk_mix_dict=None, initial_phase=None, infer=True, **kwargs):
         '''aNN (conformer) + sDSP (SubHarmo + SubNoise + OLA)
-            units_frames  :: (B, Frame, Feat) maybe
+            units_frames  :: (B, Frame, Feat)    - Unit series
             f0_frames     :: (B, Frame, 1) maybe - Fundamental tone's frequency series [Hz]
-            volume_frames :: (B, Frame) 
-            spk_id        :: (B,)
+            volume_frames :: (B, Frame)          - Frame-wise volume contour (non-overlapped RMS of the waveform)
+            spk_id        :: (B,)                - Speaker index
 
             initial_phase - maybe [rad]
         '''
-        # exciter phase
-        ## fo contour [hz] :: (B, Frame, 1) -> (B, T, 1)
-        f0 = upsample(f0_frames, self.block_size)
+        # fo contour [hz] :: (B, Frame, Feat=1) -> (B, T) - sample-wise contour
+        f0 = upsample(f0_frames, self.block_size).squeeze(-1)
+
+        # Phase contour [rad] :: (B, T, Feat=1) -> (B, Frame) - frame-wise contour by cumsum + wrapping + sample2frame
         _f0 = f0.double() if infer else f0
-        # Phase contour :: (B, T, 1) -> (B, T, 1) - [/sample]
         x = torch.cumsum(_f0 / self.sampling_rate, axis=1)
         if initial_phase is not None:
-            x += initial_phase.to(x) / 2 / np.pi    
+            initial_phase = initial_phase.squeeze(-1)
+            x += initial_phase.to(x) / 2 / np.pi
         x = x - torch.round(x)
-        x = x.to(f0)
-        # :: (B, T, 1) -> (B, Frame, 1)
-        phase_frames = 2 * np.pi * x[:, ::self.block_size, :]
-        
+        phase = x.to(f0)
+        phase_frames = 2 * np.pi * phase[:, ::self.block_size]
+
         # parameter prediction
         ctrls = self.unit2ctrl(units_frames, f0_frames, phase_frames, volume_frames, spk_id, spk_mix_dict=spk_mix_dict)
 
         # exciter signals
         ## combtooth - phase contour [Hz] / fo contour [Hz]
-        combtooth = torch.sinc(self.sampling_rate * x / (f0 + 1e-3))
-        combtooth = combtooth.squeeze(-1)     
+        combtooth = torch.sinc(self.sampling_rate * phase / (f0 + 1e-3))
         combtooth_frames = F.pad(combtooth, (self.block_size, self.block_size)).unfold(1, 2 * self.block_size, self.block_size)
         combtooth_frames = combtooth_frames * self.window
         ## noise
@@ -454,7 +451,7 @@ class CombSubFast(torch.nn.Module):
         fold = torch.nn.Fold(output_size=(1, (signal_frames_out.size(1) + 1) * self.block_size), kernel_size=(1, 2 * self.block_size), stride=(1, self.block_size))
         signal = fold(signal_frames_out.transpose(1, 2))[:, 0, 0, self.block_size : -self.block_size]
 
-        return signal, phase_frames, (signal, signal)
+        return signal, phase_frames.unsqueeze(-1), (signal, signal)
 
 
 class CombSub(torch.nn.Module):
@@ -477,24 +474,25 @@ class CombSub(torch.nn.Module):
         '''
             units_frames  :: (B, Frame, Feat) - Unit series
             f0_frames     :: (B, Frame, 1)    - fo series
-            volume_frames :: (B, Frame)       - Volume series
-            spk_id        :: (B,)             - Speaker ID
+            volume_frames :: (B, Frame)       - Frame-wise volume contour (non-overlapped RMS of the waveform)
+            spk_id        :: (B,)             - Speaker index
             spk_mix_dict
             initial_phase
             infer
         '''
         # exciter phase
-        f0 = upsample(f0_frames, self.block_size)
+        f0 = upsample(f0_frames, self.block_size).squeeze(-1)
         # 2pi * f0 [rad/s] / sr [sample/s] = [rad/sample]
         _f0 = f0.double() if infer else f0
         x = torch.cumsum(_f0 / self.sampling_rate, axis=1)
         if initial_phase is not None:
+            initial_phase = initial_phase.squeeze(-1)
             x += initial_phase.to(x) / 2 / np.pi
         x = x - torch.round(x)
-        x = x.to(f0)
+        phase = x.to(f0)
         
         # phase at each frame's start
-        phase_frames = 2 * np.pi * x[:, ::self.block_size, :]
+        phase_frames = 2 * np.pi * phase[:, ::self.block_size]
         
         # parameter prediction
         ctrls = self.unit2ctrl(units_frames, f0_frames, phase_frames, volume_frames, spk_id, spk_mix_dict=spk_mix_dict)
@@ -516,8 +514,7 @@ class CombSub(torch.nn.Module):
                                                 rand -
         """
         # combtooth exciter signal 
-        combtooth = torch.sinc(self.sampling_rate * x / (f0 + 1e-3))
-        combtooth = combtooth.squeeze(-1)
+        combtooth = torch.sinc(self.sampling_rate * phase / (f0 + 1e-3))
 
         # harmonic part filter (using dynamic-windowed LTV-FIR, with group-delay prediction)
         harmonic = frequency_filter(combtooth, torch.exp(1.j * torch.cumsum(group_delay, axis = -1)), hann_window = False)
@@ -533,4 +530,4 @@ class CombSub(torch.nn.Module):
                         
         signal = harmonic + noise
 
-        return signal, phase_frames, (harmonic, noise)
+        return signal, phase_frames.unsqueeze(-1), (harmonic, noise)

@@ -42,8 +42,8 @@ class Unit2Control(nn.Module):
         )
 
         # Embedding
-        ## fo/phase/volume continuous embeddings :: (B, Frame, 1) -> (B, Frame, Emb)
-        ## spk             discrete   embedding  :: (B,)          -> (B, Emb)
+        ## fo/phase/volume continuous embedding :: (B, Frame, 1) -> (B, Frame, Emb)
+        ## spk             discrete   embedding :: (B,)          -> (B, Emb)
         self.f0_embed     =    nn.Linear(1,     ndim_feat)
         self.phase_embed  =    nn.Linear(1,     ndim_feat)
         self.volume_embed =    nn.Linear(1,     ndim_feat)
@@ -61,25 +61,24 @@ class Unit2Control(nn.Module):
 
 
     def forward(self, units, f0, phase, volume, spk_id, spk_mix_dict = None):
-        
-        '''
+        """
         Args:
             units  :: (B, Frame, Feat) - Acoustic unit series
-            f0     :: (..., 1)         - Fundamental tone's frequency contour
-            phase  :: (..., 1)         -
-            volume :: (B, Frame)
-            spk_id :: (B,)
+            f0     :: (B, 1)           - Fundamental tone's frequency contour
+            phase  :: (B, Frame)       - Frame-wise phase  contour (phase at frame start)
+            volume :: (B, Frame)       - Frame-wise volume contour (non-overlapped RMS of the waveform)
+            spk_id :: (B,)             - Speaker index
             spk_mix_dict
         return: 
-            dict of B x n_frames x feat
-        '''
+            dict of (B, Frame, Feat)   - Feature serieses
+        """
 
         # PreNet :: (B, Frame, Feat) -> (B, Feat, Frame) -> (B, Feat, Frame) -> (B, Frame, Feat)
         x = self.prenet(units.transpose(1,2)).transpose(1,2)
 
         # Embedding
         ## Add continuous embeddings of fo/phase/volume to processed unit
-        volume = volume.unsqueeze(-1)
+        phase, volume = phase.unsqueeze(-1), volume.unsqueeze(-1)
         x = x + self.f0_embed((1+ f0 / 700).log()) + self.phase_embed(phase / np.pi) + self.volume_embed(volume)
         ## Add discrete or mixed discrete embeddings of spk to others
         if spk_mix_dict is not None:
