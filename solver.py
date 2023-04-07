@@ -45,10 +45,12 @@ def test(args, model, loss_func, loader_test, saver):
 
             # VC forward
             src_spk_id = data['spk_id']
-            tgt_spk_id = (src_spk_id + 1) // args.model.n_spk
-            src_spk_idx = str(src_spk_id.cpu().item())
-            tgt_spk_idx = str(tgt_spk_id.cpu().item())
-            fo = np.exp(lfo_stats[tgt_spk_idx] * np.log(data['f0']) / lfo_stats[src_spk_idx])
+            tgt_spk_id = (src_spk_id + 1) % args.model.n_spk
+            tgt_spk_id = torch.ones_like(tgt_spk_id) if tgt_spk_id == 0 else tgt_spk_id
+            src_lfo = torch.tensor(lfo_stats[str(src_spk_id.cpu().item())], dtype=torch.float32).to(args.device)
+            tgt_lfo = torch.tensor(lfo_stats[str(tgt_spk_id.cpu().item())], dtype=torch.float32).to(args.device)
+            print(f"{str(src_spk_id.cpu().item())}-to-{str(tgt_spk_id.cpu().item())}: {torch.exp(src_lfo).cpu().item()}-to-{torch.exp(tgt_lfo).cpu().item()}")
+            fo = torch.exp(tgt_lfo * torch.log(data['f0']) / src_lfo)
             audio_vc, _, _ = model(data['units'], fo, data['volume'], tgt_spk_id)
 
             # crop
