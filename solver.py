@@ -22,7 +22,8 @@ def test(args, model, loss_func, loader_test, saver):
     # intialization
     num_batches = len(loader_test)
     rtf_all = []
-    
+    lfo_stats = np.load(f"{args.data.train_path}/f0_stats.npy", allow_pickle=True).item()
+
     # run
     with torch.no_grad():
         for bidx, data in enumerate(loader_test):
@@ -36,18 +37,25 @@ def test(args, model, loss_func, loader_test, saver):
                     data[k] = data[k].to(args.device)
             print('>>', data['name'][0])
             audio_gt = data['audio']
+
             # Reconstruction forward
             st_time = time.time()
             audio_pred, _, _ = model(data['units'], data['f0'], data['volume'], data['spk_id'])
             ed_time = time.time()
-            # # VC forward
-            # # TODO: implementaion
-            # audio_vc, _, _ = model(data['units'], data['f0'], data['volume'], data['spk_id'])
+
+            # VC forward
+            src_spk_id = data['spk_id']
+            tgt_spk_id = (src_spk_id + 1) // args.model.n_spk
+            src_spk_idx = str(src_spk_id.cpu().item())
+            tgt_spk_idx = str(tgt_spk_id.cpu().item())
+            fo = np.exp(lfo_stats[tgt_spk_idx] * np.log(data['f0']) / lfo_stats[src_spk_idx])
+            audio_vc, _, _ = model(data['units'], fo, data['volume'], tgt_spk_id)
 
             # crop
-            min_len = np.min([audio_pred.shape[1], audio_gt.shape[1]])
+            min_len = np.min([audio_pred.shape[1], audio_gt.shape[1], audio_vc.shape[1]])
             audio_pred = audio_pred[:, :min_len]
             audio_gt   =   audio_gt[:, :min_len]
+            audio_vc   =   audio_vc[:, :min_len]
 
             # RTF
             run_time = ed_time - st_time
@@ -61,7 +69,7 @@ def test(args, model, loss_func, loader_test, saver):
             test_loss += loss.item()
 
             # log
-            saver.log_audio({fn+'/gt.wav': audio_gt, fn+'/pred.wav': audio_pred})
+            saver.log_audio({fn+'/gt.wav': audio_gt, fn+'/pred.wav': audio_pred, fn+'/vc.wav': audio_vc})
             
     # report
     test_loss /= num_batches
