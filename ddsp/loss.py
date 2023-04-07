@@ -1,11 +1,9 @@
-import numpy as np
-
 import torch
 import torch.nn as nn
 import torchaudio
 from torch.nn import functional as F
-from .core import upsample
-        
+
+
 class SSSLoss(nn.Module):
     """
     Single-scale Spectral Loss. 
@@ -32,15 +30,10 @@ class SSSLoss(nn.Module):
         
         
 class RSSLoss(nn.Module):
-    '''
-    Random-scale Spectral Loss.
-    '''
-    
+    """Random-scale Spectral Loss."""    
     def __init__(self, fft_min, fft_max, n_scale, alpha=1.0, overlap=0, eps=1e-7, device='cuda'):
         super().__init__()
-        self.fft_min = fft_min
-        self.fft_max = fft_max
-        self.n_scale = n_scale
+        self.fft_min, self.fft_max, self.n_scale = fft_min, fft_max, n_scale
         self.lossdict = {}
         for n_fft in range(fft_min, fft_max):
             self.lossdict[n_fft] = SSSLoss(n_fft, alpha, overlap, eps).to(device)
@@ -52,6 +45,3 @@ class RSSLoss(nn.Module):
             loss_func = self.lossdict[int(n_fft)]
             value += loss_func(x_true, x_pred)
         return value / self.n_scale
-            
-        
-    

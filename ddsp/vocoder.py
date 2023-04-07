@@ -219,8 +219,7 @@ class Audio2ContentVec():
         self.hubert = self.hubert.to(self.device)
         self.hubert.eval()
 
-    def __call__(self,
-                 audio):  # B, T
+    def __call__(self, audio):  # B, T
         # wav_tensor = torch.from_numpy(audio).to(self.device)
         wav_tensor = audio
         feats = wav_tensor.view(1, -1)
@@ -248,8 +247,7 @@ class Audio2HubertBase():
         self.hubert = self.hubert.float()
         self.hubert.eval()
 
-    def __call__(self,
-                 audio):  # B, T
+    def __call__(self, audio):  # B, T
         with torch.no_grad():
             padding_mask = torch.BoolTensor(audio.shape).fill_(False)
             inputs = {
@@ -270,47 +268,27 @@ class DotDict(dict):
     __setattr__ = dict.__setitem__    
     __delattr__ = dict.__delitem__
     
-def load_model(
-        model_path,
-        device='cpu'):
+def load_model(model_path, device='cpu'):
     config_file = os.path.join(os.path.split(model_path)[0], 'config.yaml')
     with open(config_file, "r") as config:
         args = yaml.safe_load(config)
     args = DotDict(args)
     
-    # load model
     model = None
-
     if args.model.type == 'Sins':
-        model = Sins(
-            sampling_rate=args.data.sampling_rate,
-            block_size=args.data.block_size,
-            n_harmonics=args.model.n_harmonics,
-            n_mag_allpass=args.model.n_mag_allpass,
-            n_mag_noise=args.model.n_mag_noise,
-            n_unit=args.data.encoder_out_channels,
-            n_spk=args.model.n_spk)
-    
+        model = Sins(sampling_rate=args.data.sampling_rate, block_size=args.data.block_size,
+                        n_harmonics=args.model.n_harmonics, n_mag_allpass=args.model.n_mag_allpass, n_mag_noise=args.model.n_mag_noise,
+                        n_unit=args.data.encoder_out_channels, n_spk=args.model.n_spk)
     elif args.model.type == 'CombSub':
-        model = CombSub(
-            sampling_rate=args.data.sampling_rate,
-            block_size=args.data.block_size,
-            n_mag_allpass=args.model.n_mag_allpass,
-            n_mag_harmonic=args.model.n_mag_harmonic,
-            n_mag_noise=args.model.n_mag_noise,
-            n_unit=args.data.encoder_out_channels,
-            n_spk=args.model.n_spk)
-    
+        model = CombSub(sampling_rate=args.data.sampling_rate, block_size=args.data.block_size,
+                        n_mag_allpass=args.model.n_mag_allpass, n_mag_harmonic=args.model.n_mag_harmonic, n_mag_noise=args.model.n_mag_noise,
+                        n_unit=args.data.encoder_out_channels, n_spk=args.model.n_spk)
     elif args.model.type == 'CombSubFast':
-        model = CombSubFast(
-            sampling_rate=args.data.sampling_rate,
-            block_size=args.data.block_size,
-            n_unit=args.data.encoder_out_channels,
-            n_spk=args.model.n_spk)
-            
+        model = CombSubFast(sampling_rate=args.data.sampling_rate, block_size=args.data.block_size,
+                        n_unit=args.data.encoder_out_channels, n_spk=args.model.n_spk)
     else:
         raise ValueError(f" [x] Unknown Model: {args.model.type}")
-    
+
     print(' [Loading] ' + model_path)
     ckpt = torch.load(model_path, map_location=torch.device(device))
     model.to(device)
@@ -402,7 +380,7 @@ class CombSubFast(torch.nn.Module):
         harmo_mag, harmo_phase, noise_mag = ctrls['harmonic_magnitude'], ctrls['harmonic_phase'], ctrls['noise_magnitude']
 
         # exciter signals
-        ## combtooth - phase contour [Hz] / fo contour [Hz]
+        ## combtooth - rotation contour [Hz] / fo contour [Hz]
         combtooth = torch.sinc(self.sampling_rate * rot / (f0 + 1e-3))
         combtooth_frames = F.pad(combtooth, (self.block_size, self.block_size)).unfold(1, 2 * self.block_size, self.block_size)
         combtooth_frames = combtooth_frames * self.window
