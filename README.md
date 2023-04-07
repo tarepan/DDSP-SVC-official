@@ -127,6 +127,13 @@ UPDATE：Mix-speaker is supported now. You can use "-mix" option to design your 
 python main.py -i <input.wav> -m <model_file.pt> -o <output.wav> -k <keychange (semitones)> -mix "{1:0.5, 2:0.5}" -eak 0
 ```
 
+### Real-time VC
+Start a simple GUI with the following command:
+```bash
+python gui.py
+```
+The front-end uses technologies such as sliding window, cross-fading, SOLA-based splicing and contextual semantic reference, which can achieve sound quality close to non-real-time synthesis with low latency and resource occupation.
+
 ## Results
 ### Sample <!-- omit in toc -->
 [Demo](#demo)
