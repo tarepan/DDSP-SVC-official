@@ -154,6 +154,8 @@ class Units_Encoder:
             self.model = Audio2ContentVec768(encoder_ckpt, device=device)
         elif encoder == 'xunit':
             self.model = Audio2XUnit(device=device)
+        elif encoder == 'yunit':
+            self.model = Audio2YUnit(device=device)
         else:
             raise ValueError(f" [x] Unknown units encoder: {encoder}")
 
