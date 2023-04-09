@@ -251,9 +251,9 @@ class FastAttention(nn.Module):
 class SelfAttention(nn.Module):
     def __init__(self, dim, heads = 8, causal = False):
         super().__init__()
-        self.heads = heads
         assert dim % heads == 0, 'dimension must be divisible by number of heads'
-        dim_head = default(dim_head, dim // heads)
+        self.heads = heads
+        dim_head = 64
         inner_dim = dim_head * heads
         self.fast_attention = FastAttention(dim_head, causal=causal)
 
