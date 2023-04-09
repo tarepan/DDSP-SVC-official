@@ -1,13 +1,11 @@
 import torch
-
 from torch import nn
 import math
 from functools import partial
 from einops import rearrange, repeat
-
 from local_attention import LocalAttention
 import torch.nn.functional as F
-#import fast_transformers.causal_product.causal_product_cuda
+
 
 def softmax_kernel(data, *, projection_matrix, is_query, normalize_data=True, eps=1e-4, device = None):
     b, h, *_ = data.shape
@@ -67,90 +65,53 @@ def default(val, d):
 def cast_tuple(val):
     return (val,) if not isinstance(val, tuple) else val
 
+
 class PCmer(nn.Module):
     """The encoder that is used in the Transformer model."""
-    
-    def __init__(self, 
-                num_layers,
-                num_heads,
-                dim_model,
-                dim_keys,
-                dim_values,
-                residual_dropout,
-                attention_dropout):
+    def __init__(self, num_layers, num_heads, dim_model, dim_keys, dim_values, residual_dropout, attention_dropout):
         super().__init__()
-        self.num_layers = num_layers
-        self.num_heads = num_heads
-        self.dim_model = dim_model
-        self.dim_values = dim_values
-        self.dim_keys = dim_keys
-        self.residual_dropout = residual_dropout
-        self.attention_dropout = attention_dropout
-
+        # Parameters are used from child layers through parent access
+        self.num_layers, self.num_heads, self.dim_model, self.dim_values, self.dim_keys, self.residual_dropout, self.attention_dropout = num_layers, num_heads, dim_model, dim_values, dim_keys, residual_dropout, attention_dropout
+        self.causal = False
         self._layers = nn.ModuleList([_EncoderLayer(self) for _ in range(num_layers)])
-        
-    #  METHODS  ########################################################################################################
-    
-    def forward(self, phone, mask=None):
-        
-        # apply all layers to the input
-        for (i, layer) in enumerate(self._layers):
-            phone = layer(phone, mask)
-        # provide the final sequence
+
+    def forward(self, phone):
+        for layer in self._layers:
+            phone = layer(phone)
         return phone
 
 
-# ==================================================================================================================== #
-#  CLASS  _ E N C O D E R  L A Y E R                                                                                   #
-# ==================================================================================================================== #
-
-
 class _EncoderLayer(nn.Module):
-    """One layer of the encoder.
-    
-    Attributes:
-        attn: (:class:`mha.MultiHeadAttention`): The attention mechanism that is used to read the input sequence.
-        feed_forward (:class:`ffl.FeedForwardLayer`): The feed-forward layer on top of the attention mechanism.
-    """
-    
+    """Conformer encoder layer."""
     def __init__(self, parent: PCmer):
-        """Creates a new instance of ``_EncoderLayer``.
-        
+        """
         Args:
-            parent (Encoder): The encoder that the layers is created for.
+            parent - The encoder that the layers is created for.
         """
         super().__init__()
-        
-        
-        self.conformer = ConformerConvModule(parent.dim_model)
+
+        self.local_mixer = ConformerConvModule(parent.dim_model, causal=parent.causal)
         self.norm = nn.LayerNorm(parent.dim_model)
         self.dropout = nn.Dropout(parent.residual_dropout)
-        
         # selfatt -> fastatt: performer!
-        self.attn = SelfAttention(dim = parent.dim_model,
-                                  heads = parent.num_heads,
-                                  causal = False)
+        self.attn = SelfAttention(dim=parent.dim_model, heads=parent.num_heads, causal=parent.causal)
         
-    #  METHODS  ########################################################################################################
-
-    def forward(self, phone, mask=None):
-        
-        # compute attention sub-layer
-        phone = phone + (self.attn(self.norm(phone), mask=mask))
-        
-        phone = phone + (self.conformer(phone))
-        
+    def forward(self, phone):
+        # Res[LN-Attn]-Res[LocalMixer]
+        phone = phone + (self.attn(self.norm(phone)))
+        phone = phone + (self.local_mixer(phone))
         return phone 
 
 def calc_same_padding(kernel_size):
+    """k=4 -> (2, 1)"""
     pad = kernel_size // 2
     return (pad, pad - (kernel_size + 1) % 2)
 
-# helper classes
 
 class Swish(nn.Module):
     def forward(self, x):
         return x * x.sigmoid()
+
 
 class Transpose(nn.Module):
     def __init__(self, dims):
@@ -161,6 +122,7 @@ class Transpose(nn.Module):
     def forward(self, x):
         return x.transpose(*self.dims)
 
+
 class GLU(nn.Module):
     def __init__(self, dim):
         super().__init__()
@@ -169,6 +131,7 @@ class GLU(nn.Module):
     def forward(self, x):
         out, gate = x.chunk(2, dim=self.dim)
         return out * gate.sigmoid()
+
 
 class DepthWiseConv1d(nn.Module):
     def __init__(self, chan_in, chan_out, kernel_size, padding):
@@ -180,14 +143,10 @@ class DepthWiseConv1d(nn.Module):
         x = F.pad(x, self.padding)
         return self.conv(x)
 
+
 class ConformerConvModule(nn.Module):
-    def __init__(
-        self,
-        dim,
-        causal = False,
-        expansion_factor = 2,
-        kernel_size = 31,
-        dropout = 0.):
+    """Alternative of Transformer's point-wise FF layer (LN-SegFC-GLU-DepthConv-Swish-SegFC-Do)."""
+    def __init__(self, dim, causal = False, expansion_factor = 2, kernel_size = 31, dropout = 0.):
         super().__init__()
 
         inner_dim = dim * expansion_factor
@@ -196,12 +155,11 @@ class ConformerConvModule(nn.Module):
         self.net = nn.Sequential(
             nn.LayerNorm(dim),
             Transpose((1, 2)),
-            nn.Conv1d(dim, inner_dim * 2, 1),
+            nn.Conv1d(      dim,       inner_dim * 2, 1),
             GLU(dim=1),
-            DepthWiseConv1d(inner_dim, inner_dim, kernel_size = kernel_size, padding = padding),
-            #nn.BatchNorm1d(inner_dim) if not causal else nn.Identity(),
+            DepthWiseConv1d(inner_dim, inner_dim,     kernel_size, padding = padding),
             Swish(),
-            nn.Conv1d(inner_dim, dim, 1),
+            nn.Conv1d(      inner_dim, dim,           1),
             Transpose((1, 2)),
             nn.Dropout(dropout)
         )
@@ -209,21 +167,17 @@ class ConformerConvModule(nn.Module):
     def forward(self, x):
         return self.net(x)
 
+
 def linear_attention(q, k, v):
     if v is None:
-        #print (k.size(), q.size())
         out = torch.einsum('...ed,...nd->...ne', k, q)
-        return out
-
     else:
         k_cumsum = k.sum(dim = -2) 
-        #k_cumsum = k.sum(dim = -2)
         D_inv = 1. / (torch.einsum('...nd,...d->...n', q, k_cumsum.type_as(q)) + 1e-8)
-
         context = torch.einsum('...nd,...ne->...de', k, v)
-        #print ("TRUEEE: ", context.size(), q.size(), D_inv.size())
         out = torch.einsum('...de,...nd,...n->...ne', context, q, D_inv)
-        return out
+    return out
+
 
 def gaussian_orthogonal_random_matrix(nb_rows, nb_columns, scaling = 0, qr_uniform_q = False, device = None):
     nb_full_blocks = int(nb_rows / nb_columns)
@@ -329,51 +283,34 @@ class SelfAttention(nn.Module):
         #self.name_embedding = nn.Parameter(name_embedding, requires_grad=True)
         
 
-        self.to_q = nn.Linear(dim, inner_dim)
-        self.to_k = nn.Linear(dim, inner_dim)
-        self.to_v = nn.Linear(dim, inner_dim)
+        self.to_q   = nn.Linear(dim,       inner_dim)
+        self.to_k   = nn.Linear(dim,       inner_dim)
+        self.to_v   = nn.Linear(dim,       inner_dim)
         self.to_out = nn.Linear(inner_dim, dim)
         self.dropout = nn.Dropout(dropout)
 
     @torch.no_grad()
     def redraw_projection_matrix(self):
         self.fast_attention.redraw_projection_matrix()
-        #torch.nn.init.zeros_(self.name_embedding)
-        #print (torch.sum(self.name_embedding))
-    def forward(self, x, context = None, mask = None, context_mask = None, name=None, inference=False, **kwargs):
-        b, n, _, h, gh = *x.shape, self.heads, self.global_heads
-        
-        cross_attend = exists(context)
 
-        context = default(context, x)
-        context_mask = default(context_mask, mask) if not cross_attend else context_mask
-        #print (torch.sum(self.name_embedding))
-        q, k, v = self.to_q(x), self.to_k(context), self.to_v(context)
-
+    def forward(self, x):
+        # Prepare QKV - SegFC + multi-head reshape
+        h, gh = self.heads, self.heads
+        q, k, v = self.to_q(x), self.to_k(x), self.to_v(x)
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
         (q, lq), (k, lk), (v, lv) = map(lambda t: (t[:, :gh], t[:, gh:]), (q, k, v))
 
+        # Run attention
         attn_outs = []
-        #print (name)
-        #print (self.name_embedding[name].size())
         if not empty(q):
-            if exists(context_mask):
-                global_mask = context_mask[:, None, :, None]
-                v.masked_fill_(~global_mask, 0.)
-            if cross_attend:
-                pass
-                #print (torch.sum(self.name_embedding))
-                #out = self.fast_attention(q,self.name_embedding[name],None)
-                #print (torch.sum(self.name_embedding[...,-1:]))
-            else:
-                out = self.fast_attention(q, k, v)
+            out = self.fast_attention(q, k, v)
             attn_outs.append(out)
 
         if not empty(lq):
-            assert not cross_attend, 'local attention is not compatible with cross attention'
-            out = self.local_attn(lq, lk, lv, input_mask = mask)
+            out = self.local_attn(lq, lk, lv)
             attn_outs.append(out)
 
+        # Reshape + SegFC
         out = torch.cat(attn_outs, dim = 1)
         out = rearrange(out, 'b h n d -> b n (h d)')
         out =  self.to_out(out)
