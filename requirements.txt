@@ -5,7 +5,7 @@ flask_cors
 gin
 gin_config
 librosa
-local_attention
+# local_attention
 numpy
 praat-parselmouth
 pyworld

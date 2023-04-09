@@ -3,7 +3,6 @@ from torch import nn
 import math
 from functools import partial
 from einops import rearrange, repeat
-from local_attention import LocalAttention
 import torch.nn.functional as F
 
 
@@ -232,10 +231,12 @@ class FastAttention(nn.Module):
         if causal:
             try:
                 import fast_transformers.causal_product.causal_product_cuda
-                self.causal_linear_fn = partial(causal_linear_attention)
+                causal_linear_fn = partial(causal_linear_attention)
             except ImportError:
                 print('unable to import cuda code for auto-regressive Performer. will default to the memory inefficient non-cuda version')
-                self.causal_linear_fn = causal_linear_attention_noncuda
+                causal_linear_fn = causal_linear_attention_noncuda
+        self.attn_fn = linear_attention if not causal else causal_linear_fn
+
     @torch.no_grad()
     def redraw_projection_matrix(self):
         projections = self.create_projection()
@@ -243,51 +244,34 @@ class FastAttention(nn.Module):
         del projections
 
     def forward(self, q, k, v):
-        device = q.device
-
         if self.no_projection:
             q = q.softmax(dim = -1)
             k = torch.exp(k) if self.causal else k.softmax(dim = -2)
-
         elif self.generalized_attention:
-            create_kernel = partial(generalized_kernel, kernel_fn = self.kernel_fn, projection_matrix = self.projection_matrix, device = device)
+            create_kernel = partial(generalized_kernel, kernel_fn = self.kernel_fn, projection_matrix = self.projection_matrix, device = q.device)
             q, k = map(create_kernel, (q, k))
-
         else:
-            create_kernel = partial(softmax_kernel, projection_matrix = self.projection_matrix, device = device)
-            
-            q = create_kernel(q, is_query = True)
-            k = create_kernel(k, is_query = False)
+            create_kernel = partial(softmax_kernel,                                 projection_matrix = self.projection_matrix, device = q.device)
+            q, k = create_kernel(q, is_query = True), create_kernel(k, is_query = False)
 
-        attn_fn = linear_attention if not self.causal else self.causal_linear_fn
-        if v is None:
-            out = attn_fn(q, k, None)
-            return out
-        else:
-            out = attn_fn(q, k, v)
-            return out
+        out = self.attn_fn(q, k, v)
+        return out
+
+
 class SelfAttention(nn.Module):
-    def __init__(self, dim, causal = False, heads = 8, dim_head = 64, local_heads = 0, local_window_size = 256, nb_features = None, feature_redraw_interval = 1000, generalized_attention = False, kernel_fn = nn.ReLU(), qr_uniform_q = False, dropout = 0., no_projection = False):
+    def __init__(self, dim, heads = 8, causal = False):
         super().__init__()
+        self.heads = heads
         assert dim % heads == 0, 'dimension must be divisible by number of heads'
         dim_head = default(dim_head, dim // heads)
         inner_dim = dim_head * heads
-        self.fast_attention = FastAttention(dim_head, nb_features, causal = causal, generalized_attention = generalized_attention, kernel_fn = kernel_fn, qr_uniform_q = qr_uniform_q, no_projection = no_projection)
-
-        self.heads = heads
-        self.global_heads = heads - local_heads
-        self.local_attn = LocalAttention(window_size = local_window_size, causal = causal, autopad = True, dropout = dropout, look_forward = int(not causal), rel_pos_emb_config = (dim_head, local_heads)) if local_heads > 0 else None
-
-        #print (heads, nb_features, dim_head)
-        #name_embedding = torch.zeros(110, heads, dim_head, dim_head)
-        #self.name_embedding = nn.Parameter(name_embedding, requires_grad=True)
-        
+        self.fast_attention = FastAttention(dim_head, None, causal=causal, generalized_attention=False, kernel_fn=nn.ReLU(), qr_uniform_q=False, no_projection=False)
 
         self.to_q   = nn.Linear(dim,       inner_dim)
         self.to_k   = nn.Linear(dim,       inner_dim)
         self.to_v   = nn.Linear(dim,       inner_dim)
         self.to_out = nn.Linear(inner_dim, dim)
-        self.dropout = nn.Dropout(dropout)
+        self.dropout = nn.Dropout(0.)
 
     @torch.no_grad()
     def redraw_projection_matrix(self):
@@ -295,23 +279,19 @@ class SelfAttention(nn.Module):
 
     def forward(self, x):
         # Prepare QKV - SegFC + multi-head reshape
-        h, gh = self.heads, self.heads
         q, k, v = self.to_q(x), self.to_k(x), self.to_v(x)
-        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
-        (q, lq), (k, lk), (v, lv) = map(lambda t: (t[:, :gh], t[:, gh:]), (q, k, v))
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), (q, k, v))
+
+        # Local attention remnant
+        gh = self.heads
+        (q, lq), (k, _), (v, _) = map(lambda t: (t[:, :gh], t[:, gh:]), (q, k, v))
+        if not empty(lq):
+            raise RuntimeError("Local attention is deprecated.")
 
         # Run attention
-        attn_outs = []
-        if not empty(q):
-            out = self.fast_attention(q, k, v)
-            attn_outs.append(out)
-
-        if not empty(lq):
-            out = self.local_attn(lq, lk, lv)
-            attn_outs.append(out)
+        out = self.fast_attention(q, k, v)
 
         # Reshape + SegFC
-        out = torch.cat(attn_outs, dim = 1)
         out = rearrange(out, 'b h n d -> b n (h d)')
         out =  self.to_out(out)
         return self.dropout(out)
