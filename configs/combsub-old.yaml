@@ -18,6 +18,7 @@ model:
   n_mag_harmonic:  512
   n_mag_noise: 256
   n_spk: 100
+  c: false
 enhancer:
     type: 'nsf-hifigan'
     ckpt: 'pretrain/nsf_hifigan/model'

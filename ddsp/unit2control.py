@@ -20,7 +20,7 @@ def split_to_dict(tensor, tensor_splits):
 
 
 class Unit2Control(nn.Module):
-    def __init__(self, ndim_feat_i, n_spk: int, output_splits):
+    def __init__(self, ndim_feat_i, n_spk: int, output_splits, c: bool = False):
         """
         Args:
             input_channel - Feature dimension size of unit series
@@ -50,8 +50,9 @@ class Unit2Control(nn.Module):
         self.spk_embed    = nn.Embedding(n_spk, ndim_feat)
 
         # Conformer decoder & Linear postNet
+        num_layers, num_heads = 3, 8
         self.dec_post = nn.Sequential(
-            PCmer(num_layers=3, num_heads=8, dim_model=ndim_feat),
+            PCmer(num_layers, num_heads, ndim_feat, c),
             nn.LayerNorm(ndim_feat),
             weight_norm(nn.Linear(ndim_feat, ndim_out)),
         )

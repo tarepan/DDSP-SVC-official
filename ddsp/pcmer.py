@@ -194,7 +194,6 @@ class FastAttention(nn.Module):
         self.register_buffer('projection_matrix', self.create_projection())
 
         # Attention function
-        self.causal = causal
         if causal:
             # optimized CUDA executor
             import fast_transformers.causal_product.causal_product_cuda

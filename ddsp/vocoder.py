@@ -341,14 +341,14 @@ def load_model(model_path, device='cpu'):
     if args.model.type == 'Sins':
         model = Sins(sampling_rate=args.data.sampling_rate, block_size=args.data.block_size,
                         n_harmonics=args.model.n_harmonics, n_mag_allpass=args.model.n_mag_allpass, n_mag_noise=args.model.n_mag_noise,
-                        n_unit=args.data.encoder_out_channels, n_spk=args.model.n_spk)
+                        n_unit=args.data.encoder_out_channels, n_spk=args.model.n_spk, c=args.model.c,)
     elif args.model.type == 'CombSub':
         model = CombSub(sampling_rate=args.data.sampling_rate, block_size=args.data.block_size,
                         n_mag_allpass=args.model.n_mag_allpass, n_mag_harmonic=args.model.n_mag_harmonic, n_mag_noise=args.model.n_mag_noise,
-                        n_unit=args.data.encoder_out_channels, n_spk=args.model.n_spk)
+                        n_unit=args.data.encoder_out_channels, n_spk=args.model.n_spk, c=args.model.c,)
     elif args.model.type == 'CombSubFast':
         model = CombSubFast(sampling_rate=args.data.sampling_rate, block_size=args.data.block_size,
-                        n_unit=args.data.encoder_out_channels, n_spk=args.model.n_spk)
+                        n_unit=args.data.encoder_out_channels, n_spk=args.model.n_spk, c=args.model.c,)
     else:
         raise ValueError(f" [x] Unknown Model: {args.model.type}")
 
@@ -361,13 +361,13 @@ def load_model(model_path, device='cpu'):
 
 
 class Sins(torch.nn.Module):
-    def __init__(self, sampling_rate, block_size, n_harmonics, n_mag_allpass, n_mag_noise, n_unit=256, n_spk=1):
+    def __init__(self, sampling_rate, block_size, n_harmonics, n_mag_allpass, n_mag_noise, n_unit=256, n_spk=1, c: bool=False):
         super().__init__()
         print(' [DDSP Model] Sinusoids Additive Synthesiser')
 
         self.register_buffer("sampling_rate", torch.tensor(sampling_rate))
         self.register_buffer("block_size", torch.tensor(block_size))
-        self.unit2ctrl = Unit2Control(n_unit, n_spk, { 'amplitudes': n_harmonics, 'group_delay': n_mag_allpass, 'noise_magnitude': n_mag_noise, })
+        self.unit2ctrl = Unit2Control(n_unit, n_spk, { 'amplitudes': n_harmonics, 'group_delay': n_mag_allpass, 'noise_magnitude': n_mag_noise, }, c)
 
     def forward(self, units_frames, f0_frames, volume_frames, spk_id, spk_mix_dict=None, initial_phase=None, infer=True, max_upsample_dim=32):
         '''
@@ -415,14 +415,14 @@ class Sins(torch.nn.Module):
 
 
 class CombSubFast(torch.nn.Module):
-    def __init__(self, sampling_rate, block_size, n_unit=256, n_spk=1):
+    def __init__(self, sampling_rate, block_size, n_unit=256, n_spk=1, c: bool=False):
         super().__init__()
         print(' [DDSP Model] Combtooth Subtractive Synthesiser')
 
         self.register_buffer("sampling_rate", torch.tensor(sampling_rate))
         self.register_buffer("block_size",    torch.tensor(block_size))
         self.register_buffer("window",        torch.sqrt(torch.hann_window(2 * block_size)))
-        self.unit2ctrl = Unit2Control(n_unit, n_spk, { 'harmonic_magnitude': block_size + 1, 'harmonic_phase': block_size + 1, 'noise_magnitude': block_size + 1, })
+        self.unit2ctrl = Unit2Control(n_unit, n_spk, { 'harmonic_magnitude': block_size + 1, 'harmonic_phase': block_size + 1, 'noise_magnitude': block_size + 1, }, c)
 
     def forward(self, units_frames, f0_frames, volume_frames, spk_id, spk_mix_dict=None, initial_phase=None, infer=True, **kwargs):
         '''aNN (conformer) + sDSP (SubHarmo + SubNoise + OLA)
@@ -474,13 +474,13 @@ class CombSubFast(torch.nn.Module):
 
 
 class CombSub(torch.nn.Module):
-    def __init__(self, sampling_rate, block_size, n_mag_allpass, n_mag_harmonic, n_mag_noise, n_unit=256, n_spk=1):
+    def __init__(self, sampling_rate, block_size, n_mag_allpass, n_mag_harmonic, n_mag_noise, n_unit=256, n_spk=1, c: bool=False):
         super().__init__()
         print(' [DDSP Model] Combtooth Subtractive Synthesiser (Old Version)')
 
         self.register_buffer("sampling_rate", torch.tensor(sampling_rate))
         self.register_buffer("block_size", torch.tensor(block_size))
-        self.unit2ctrl = Unit2Control(n_unit, n_spk, { 'group_delay': n_mag_allpass, 'harmonic_magnitude': n_mag_harmonic, 'noise_magnitude': n_mag_noise, })
+        self.unit2ctrl = Unit2Control(n_unit, n_spk, { 'group_delay': n_mag_allpass, 'harmonic_magnitude': n_mag_harmonic, 'noise_magnitude': n_mag_noise, }, c)
 
     def forward(self, units_frames, f0_frames, volume_frames, spk_id, spk_mix_dict=None, initial_phase=None, infer=True, **kwargs):
         '''
