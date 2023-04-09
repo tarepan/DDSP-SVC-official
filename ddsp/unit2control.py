@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn.utils import weight_norm
+from extorch import Conv1dEx
 
 from .pcmer import PCmer
 
@@ -35,10 +36,10 @@ class Unit2Control(nn.Module):
         # PreNet - Conv-GN-LReLU-Conv
         kernel = 3
         self.prenet = nn.Sequential(
-            nn.Conv1d(ndim_feat_i, ndim_feat, kernel, padding="same"),
-            nn.GroupNorm(4,        ndim_feat),
+            Conv1dEx(ndim_feat_i, ndim_feat, kernel, padding="same", causal=c),
+            nn.GroupNorm(4,       ndim_feat),
             nn.LeakyReLU(),
-            nn.Conv1d(ndim_feat,   ndim_feat, kernel, padding="same")
+            Conv1dEx(ndim_feat,   ndim_feat, kernel, padding="same", causal=c),
         )
 
         # Embedding
