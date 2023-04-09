@@ -101,6 +101,7 @@ class _EncoderLayer(nn.Module):
         phone = phone + (self.local_mixer(phone))
         return phone 
 
+
 def calc_same_padding(kernel_size):
     """k=4 -> (2, 1)"""
     pad = kernel_size // 2
@@ -207,26 +208,18 @@ def gaussian_orthogonal_random_matrix(nb_rows, nb_columns, scaling = 0, qr_unifo
 
     return torch.diag(multiplier) @ final_matrix
 
+
 class FastAttention(nn.Module):
-    def __init__(self, dim_heads, nb_features = None, ortho_scaling = 0, causal = False, generalized_attention = False, kernel_fn = nn.ReLU(), qr_uniform_q = False, no_projection = False):
+    def __init__(self, dim_heads, causal = False):
         super().__init__()
-        nb_features = default(nb_features, int(dim_heads * math.log(dim_heads)))
 
-        self.dim_heads = dim_heads
-        self.nb_features = nb_features
-        self.ortho_scaling = ortho_scaling
-
-        self.create_projection = partial(gaussian_orthogonal_random_matrix, nb_rows = self.nb_features, nb_columns = dim_heads, scaling = ortho_scaling, qr_uniform_q = qr_uniform_q)
+        # Projection parameters
+        nb_features = int(dim_heads * math.log(dim_heads))
+        self.create_projection = partial(gaussian_orthogonal_random_matrix, nb_rows=nb_features, nb_columns=dim_heads, scaling=0, qr_uniform_q=False)
         projection_matrix = self.create_projection()
         self.register_buffer('projection_matrix', projection_matrix)
 
-        self.generalized_attention = generalized_attention
-        self.kernel_fn = kernel_fn
-
-        # if this is turned on, no projection will be used
-        # queries and keys will be softmax-ed as in the original efficient attention paper
-        self.no_projection = no_projection
-
+        # Attention function
         self.causal = causal
         if causal:
             try:
@@ -244,18 +237,15 @@ class FastAttention(nn.Module):
         del projections
 
     def forward(self, q, k, v):
-        if self.no_projection:
-            q = q.softmax(dim = -1)
-            k = torch.exp(k) if self.causal else k.softmax(dim = -2)
-        elif self.generalized_attention:
-            create_kernel = partial(generalized_kernel, kernel_fn = self.kernel_fn, projection_matrix = self.projection_matrix, device = q.device)
-            q, k = map(create_kernel, (q, k))
-        else:
-            create_kernel = partial(softmax_kernel,                                 projection_matrix = self.projection_matrix, device = q.device)
-            q, k = create_kernel(q, is_query = True), create_kernel(k, is_query = False)
-
-        out = self.attn_fn(q, k, v)
-        return out
+        # # no projection - Q (queries) and K (keys) will be softmax-ed as in the original efficient attention paper
+        #     q = q.softmax(dim = -1)
+        #     k = torch.exp(k) if self.causal else k.softmax(dim = -2)
+        # # generalized attention
+        #     q = generalized_kernel(q, kernel_fn=nn.ReLU(), projection_matrix=self.projection_matrix,                 device=q.device)
+        #     k = generalized_kernel(q, kernel_fn=nn.ReLU(), projection_matrix=self.projection_matrix,                 device=k.device)
+        q = softmax_kernel(q, projection_matrix=self.projection_matrix, is_query=True)
+        k = softmax_kernel(k, projection_matrix=self.projection_matrix, is_query=False)
+        return self.attn_fn(q, k, v)
 
 
 class SelfAttention(nn.Module):
@@ -265,7 +255,7 @@ class SelfAttention(nn.Module):
         assert dim % heads == 0, 'dimension must be divisible by number of heads'
         dim_head = default(dim_head, dim // heads)
         inner_dim = dim_head * heads
-        self.fast_attention = FastAttention(dim_head, None, causal=causal, generalized_attention=False, kernel_fn=nn.ReLU(), qr_uniform_q=False, no_projection=False)
+        self.fast_attention = FastAttention(dim_head, causal=causal)
 
         self.to_q   = nn.Linear(dim,       inner_dim)
         self.to_k   = nn.Linear(dim,       inner_dim)
