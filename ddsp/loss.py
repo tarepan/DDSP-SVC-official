@@ -5,24 +5,20 @@ from torch.nn import functional as F
 
 
 class SSSLoss(nn.Module):
-    """
-    Single-scale Spectral Loss. 
-    """
+    """Single-scale Spectral Loss."""
 
     def __init__(self, n_fft=111, alpha=1.0, overlap=0, eps=1e-7):
         super().__init__()
-        self.n_fft = n_fft
-        self.alpha = alpha
-        self.eps = eps
-        self.hop_length = int(n_fft * (1 - overlap))  # 25% of the length
-        self.spec = torchaudio.transforms.Spectrogram(n_fft=self.n_fft, hop_length=self.hop_length, power=1, normalized=True, center=False)
+        self.alpha, self.eps = alpha, eps
+        hop_length = int(n_fft * (1 - overlap))  # 25% of the length
+        self.spec = torchaudio.transforms.Spectrogram(n_fft=n_fft, hop_length=hop_length, power=1, normalized=True, center=False)
         
     def forward(self, x_true, x_pred):
         S_true = self.spec(x_true) + self.eps
         S_pred = self.spec(x_pred) + self.eps
-        
+
         converge_term = torch.mean(torch.linalg.norm(S_true - S_pred, dim = (1, 2)) / torch.linalg.norm(S_true + S_pred, dim = (1, 2)))
-        
+
         log_term = F.l1_loss(S_true.log(), S_pred.log())
 
         loss = converge_term + self.alpha * log_term
@@ -37,7 +33,7 @@ class RSSLoss(nn.Module):
         self.lossdict = {}
         for n_fft in range(fft_min, fft_max):
             self.lossdict[n_fft] = SSSLoss(n_fft, alpha, overlap, eps).to(device)
-        
+
     def forward(self, x_pred, x_true):
         value = 0.
         n_ffts = torch.randint(self.fft_min, self.fft_max, (self.n_scale,))

@@ -242,12 +242,6 @@ class SelfAttention(nn.Module):
         q, k, v = self.to_q(x), self.to_k(x), self.to_v(x)
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), (q, k, v))
 
-        # Local attention remnant
-        gh = self.heads
-        (q, lq), (k, _), (v, _) = map(lambda t: (t[:, :gh], t[:, gh:]), (q, k, v))
-        if not (lq.numel() == 0):
-            raise RuntimeError("Local attention is deprecated.")
-
         # Run attention
         out = self.fast_attention(q, k, v)
 

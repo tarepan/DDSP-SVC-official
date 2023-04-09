@@ -49,16 +49,8 @@ def traverse_dir(
 
 
 def get_data_loaders(args, whole_audio=False):
-    data_train = AudioDataset(
-        args.data.train_path,
-        waveform_sec=args.data.duration,
-        hop_size=args.data.block_size,
-        sample_rate=args.data.sampling_rate,
-        load_all_data=args.train.cache_all_data,
-        whole_audio=whole_audio,
-        n_spk=args.model.n_spk,
-        device=args.train.cache_device,
-        fp16=args.train.cache_fp16)
+    data_train = AudioDataset(args.data.train_path, waveform_sec=args.data.duration, hop_size=args.data.block_size, sample_rate=args.data.sampling_rate, load_all_data=args.train.cache_all_data, whole_audio=whole_audio, n_spk=args.model.n_spk, device=args.train.cache_device, fp16=args.train.cache_fp16)
+    data_valid = AudioDataset(args.data.valid_path, waveform_sec=args.data.duration, hop_size=args.data.block_size, sample_rate=args.data.sampling_rate, load_all_data=args.train.cache_all_data, whole_audio=True,        n_spk=args.model.n_spk)
     loader_train = torch.utils.data.DataLoader(
         data_train ,
         batch_size=args.train.batch_size if not whole_audio else 1,
@@ -67,14 +59,6 @@ def get_data_loaders(args, whole_audio=False):
         persistent_workers=(args.train.num_workers > 0) if args.train.cache_device=='cpu' else False,
         pin_memory=True if args.train.cache_device=='cpu' else False
     )
-    data_valid = AudioDataset(
-        args.data.valid_path,
-        waveform_sec=args.data.duration,
-        hop_size=args.data.block_size,
-        sample_rate=args.data.sampling_rate,
-        load_all_data=args.train.cache_all_data,
-        whole_audio=True,
-        n_spk=args.model.n_spk)
     loader_valid = torch.utils.data.DataLoader(
         data_valid,
         batch_size=1,
