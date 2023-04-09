@@ -4,6 +4,7 @@ import math
 from functools import partial
 from einops import rearrange, repeat
 import torch.nn.functional as F
+from extorch import Conv1dEx
 
 
 class PCmer(nn.Module):
@@ -174,7 +175,6 @@ def null_context():
 
 # From 'performer-pytorch', under MIT license
 def causal_linear_attention(q, k, v, eps = 1e-6):
-    from fast_transformers.causal_product import CausalDotProduct
     autocast_enabled = torch.is_autocast_enabled()
     is_half = isinstance(q, torch.cuda.HalfTensor)
     assert not is_half, 'half tensors can only be used if nvidia apex is available'
@@ -205,6 +205,9 @@ class FastAttention(nn.Module):
         self.register_buffer('projection_matrix', self.create_projection())
 
         # Attention function
+        if causal:
+            from fast_transformers.causal_product import CausalDotProduct
+
         self.attn_fn = linear_attention if not causal else causal_linear_attention
 
     @torch.no_grad()
