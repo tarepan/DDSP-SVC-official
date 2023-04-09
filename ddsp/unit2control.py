@@ -51,7 +51,7 @@ class Unit2Control(nn.Module):
 
         # Conformer decoder & Linear postNet
         self.dec_post = nn.Sequential(
-            PCmer(num_layers=3, num_heads=8, dim_model=ndim_feat, dim_keys=256, dim_values=256, residual_dropout=0.1, attention_dropout=0.1),
+            PCmer(num_layers=3, num_heads=8, dim_model=ndim_feat),
             nn.LayerNorm(ndim_feat),
             weight_norm(nn.Linear(ndim_feat, ndim_out)),
         )

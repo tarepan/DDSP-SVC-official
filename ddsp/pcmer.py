@@ -8,33 +8,26 @@ import torch.nn.functional as F
 
 class PCmer(nn.Module):
     """The encoder that is used in the Transformer model."""
-    def __init__(self, num_layers, num_heads, dim_model, dim_keys, dim_values, residual_dropout, attention_dropout):
+    def __init__(self, num_layers: int, num_heads: int, dim_model: int, causal: bool = False):
         super().__init__()
-        # Parameters are used from child layers through parent access
-        self.num_layers, self.num_heads, self.dim_model, self.dim_values, self.dim_keys, self.residual_dropout, self.attention_dropout = num_layers, num_heads, dim_model, dim_values, dim_keys, residual_dropout, attention_dropout
-        self.causal = False
-        self._layers = nn.ModuleList([_EncoderLayer(self) for _ in range(num_layers)])
-
+        self.net = nn.Sequential(*[_EncoderLayer(num_heads, dim_model, causal) for _ in range(num_layers)])
     def forward(self, phone):
-        for layer in self._layers:
-            phone = layer(phone)
-        return phone
+        return self.net(phone)
 
 
 class _EncoderLayer(nn.Module):
     """Conformer encoder layer."""
-    def __init__(self, parent: PCmer):
+    def __init__(self, n_head: int, ndim_model: int, causal: bool):
         """
         Args:
             parent - The encoder that the layers is created for.
         """
         super().__init__()
 
-        self.local_mixer = ConformerConvModule(parent.dim_model, causal=parent.causal)
-        self.norm = nn.LayerNorm(parent.dim_model)
-        self.dropout = nn.Dropout(parent.residual_dropout)
         # selfatt -> fastatt: performer!
-        self.attn = SelfAttention(dim=parent.dim_model, heads=parent.num_heads, causal=parent.causal)
+        self.norm = nn.LayerNorm(ndim_model)
+        self.attn = SelfAttention(dim=ndim_model, heads=n_head, causal=causal)
+        self.local_mixer = ConformerConvModule(ndim_model, causal=causal)
         
     def forward(self, phone):
         # Res[LN-Attn]-Res[LocalMixer]
