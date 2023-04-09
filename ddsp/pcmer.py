@@ -184,6 +184,36 @@ def softmax_kernel(data, *, projection_matrix, is_query, normalize_data=True, ep
     return data_dash.type_as(data)
 
 
+from torch.cuda.amp import autocast
+from contextlib import contextmanager
+
+@contextmanager
+def null_context():
+    yield
+
+# From 'performer-pytorch', under MIT license
+def causal_linear_attention(q, k, v, eps = 1e-6):
+    from fast_transformers.causal_product import CausalDotProduct
+    autocast_enabled = torch.is_autocast_enabled()
+    is_half = isinstance(q, torch.cuda.HalfTensor)
+    assert not is_half, 'half tensors can only be used if nvidia apex is available'
+    cuda_context = null_context if not autocast_enabled else partial(autocast, enabled = False)
+
+    causal_dot_product_fn = CausalDotProduct.apply
+
+    k_cumsum = k.cumsum(dim=-2) + eps
+    D_inv = 1. / torch.einsum('...nd,...nd->...n', q, k_cumsum.type_as(q))
+
+    with cuda_context():
+        if autocast_enabled:
+            q, k, v = map(lambda t: t.float(), (q, k, v))
+
+        out = causal_dot_product_fn(q, k, v)
+
+    out = torch.einsum('...nd,...n->...nd', out, D_inv)
+    return out
+
+
 class FastAttention(nn.Module):
     def __init__(self, dim_heads, causal = False):
         super().__init__()
@@ -194,11 +224,7 @@ class FastAttention(nn.Module):
         self.register_buffer('projection_matrix', self.create_projection())
 
         # Attention function
-        if causal:
-            # optimized CUDA executor
-            import fast_transformers.causal_product.causal_product_cuda
-            causal_linear_fn = partial(causal_linear_attention)
-        self.attn_fn = linear_attention if not causal else causal_linear_fn
+        self.attn_fn = linear_attention if not causal else causal_linear_attention
 
     @torch.no_grad()
     def redraw_projection_matrix(self):
