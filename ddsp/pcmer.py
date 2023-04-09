@@ -6,65 +6,6 @@ from einops import rearrange, repeat
 import torch.nn.functional as F
 
 
-def softmax_kernel(data, *, projection_matrix, is_query, normalize_data=True, eps=1e-4, device = None):
-    b, h, *_ = data.shape
-    # (batch size, head, length, model_dim)
-
-    # normalize model dim
-    data_normalizer = (data.shape[-1] ** -0.25) if normalize_data else 1.
-
-    # what is ration?, projection_matrix.shape[0] --> 266
-    
-    ratio = (projection_matrix.shape[0] ** -0.5)
-
-    projection = repeat(projection_matrix, 'j d -> b h j d', b = b, h = h)
-    projection = projection.type_as(data)
-
-    #data_dash = w^T x
-    data_dash = torch.einsum('...id,...jd->...ij', (data_normalizer * data), projection)
-
-    
-    # diag_data = D**2 
-    diag_data = data ** 2
-    diag_data = torch.sum(diag_data, dim=-1)
-    diag_data = (diag_data / 2.0) * (data_normalizer ** 2)
-    diag_data = diag_data.unsqueeze(dim=-1)
-    
-    #print ()
-    if is_query:
-        data_dash = ratio * (
-            torch.exp(data_dash - diag_data -
-                    torch.max(data_dash, dim=-1, keepdim=True).values) + eps)
-    else:
-        data_dash = ratio * (
-            torch.exp(data_dash - diag_data + eps))#- torch.max(data_dash)) + eps)
-
-    return data_dash.type_as(data)
-
-def orthogonal_matrix_chunk(cols, qr_uniform_q = False, device = None):
-    unstructured_block = torch.randn((cols, cols), device = device)
-    q, r = torch.linalg.qr(unstructured_block.cpu(), mode='reduced')
-    q, r = map(lambda t: t.to(device), (q, r))
-
-    # proposed by @Parskatt
-    # to make sure Q is uniform https://arxiv.org/pdf/math-ph/0609050.pdf
-    if qr_uniform_q:
-        d = torch.diag(r, 0)
-        q *= d.sign()
-    return q.t()
-def exists(val):
-    return val is not None
-
-def empty(tensor):
-    return tensor.numel() == 0
-
-def default(val, d):
-    return val if exists(val) else d
-
-def cast_tuple(val):
-    return (val,) if not isinstance(val, tuple) else val
-
-
 class PCmer(nn.Module):
     """The encoder that is used in the Transformer model."""
     def __init__(self, num_layers, num_heads, dim_model, dim_keys, dim_values, residual_dropout, attention_dropout):
@@ -102,6 +43,7 @@ class _EncoderLayer(nn.Module):
         return phone 
 
 
+#### ConvFF #########################################################################################################################
 def calc_same_padding(kernel_size):
     """k=4 -> (2, 1)"""
     pad = kernel_size // 2
@@ -166,7 +108,10 @@ class ConformerConvModule(nn.Module):
 
     def forward(self, x):
         return self.net(x)
+#### /ConvFF ########################################################################################################################
 
+
+#### Attentions #####################################################################################################################
 
 def linear_attention(q, k, v):
     if v is None:
@@ -177,6 +122,19 @@ def linear_attention(q, k, v):
         context = torch.einsum('...nd,...ne->...de', k, v)
         out = torch.einsum('...de,...nd,...n->...ne', context, q, D_inv)
     return out
+
+
+def orthogonal_matrix_chunk(cols, qr_uniform_q = False, device = None):
+    unstructured_block = torch.randn((cols, cols), device = device)
+    q, r = torch.linalg.qr(unstructured_block.cpu(), mode='reduced')
+    q, r = map(lambda t: t.to(device), (q, r))
+
+    # proposed by @Parskatt
+    # to make sure Q is uniform https://arxiv.org/pdf/math-ph/0609050.pdf
+    if qr_uniform_q:
+        d = torch.diag(r, 0)
+        q *= d.sign()
+    return q.t()
 
 
 def gaussian_orthogonal_random_matrix(nb_rows, nb_columns, scaling = 0, qr_uniform_q = False, device = None):
@@ -209,6 +167,45 @@ def gaussian_orthogonal_random_matrix(nb_rows, nb_columns, scaling = 0, qr_unifo
     return torch.diag(multiplier) @ final_matrix
 
 
+def softmax_kernel(data, *, projection_matrix, is_query, normalize_data=True, eps=1e-4):
+    """
+    Args:
+        data
+        projection_matrix
+        is_query
+        normalize_data
+        eps
+    """
+    b, h, *_ = data.shape
+    # (batch size, head, length, model_dim)
+
+    # normalize model dim
+    data_normalizer = (data.shape[-1] ** -0.25) if normalize_data else 1.
+
+    # what is ration?, projection_matrix.shape[0] --> 266
+    
+    ratio = (projection_matrix.shape[0] ** -0.5)
+
+    projection = repeat(projection_matrix, 'j d -> b h j d', b = b, h = h)
+    projection = projection.type_as(data)
+
+    #data_dash = w^T x
+    data_dash = torch.einsum('...id,...jd->...ij', (data_normalizer * data), projection)
+
+    # diag_data = D**2 
+    diag_data = data ** 2
+    diag_data = torch.sum(diag_data, dim=-1)
+    diag_data = (diag_data / 2.0) * (data_normalizer ** 2)
+    diag_data = diag_data.unsqueeze(dim=-1)
+    
+    if is_query:
+        data_dash = ratio * (torch.exp(data_dash - diag_data - torch.max(data_dash, dim=-1, keepdim=True).values) + eps)
+    else:
+        data_dash = ratio * (torch.exp(data_dash - diag_data                                               + eps)      )
+
+    return data_dash.type_as(data)
+
+
 class FastAttention(nn.Module):
     def __init__(self, dim_heads, causal = False):
         super().__init__()
@@ -216,8 +213,7 @@ class FastAttention(nn.Module):
         # Projection parameters
         nb_features = int(dim_heads * math.log(dim_heads))
         self.create_projection = partial(gaussian_orthogonal_random_matrix, nb_rows=nb_features, nb_columns=dim_heads, scaling=0, qr_uniform_q=False)
-        projection_matrix = self.create_projection()
-        self.register_buffer('projection_matrix', projection_matrix)
+        self.register_buffer('projection_matrix', self.create_projection())
 
         # Attention function
         self.causal = causal
@@ -275,7 +271,7 @@ class SelfAttention(nn.Module):
         # Local attention remnant
         gh = self.heads
         (q, lq), (k, _), (v, _) = map(lambda t: (t[:, :gh], t[:, gh:]), (q, k, v))
-        if not empty(lq):
+        if not (lq.numel() == 0):
             raise RuntimeError("Local attention is deprecated.")
 
         # Run attention
@@ -285,3 +281,4 @@ class SelfAttention(nn.Module):
         out = rearrange(out, 'b h n d -> b n (h d)')
         out =  self.to_out(out)
         return self.dropout(out)
+#### /Attentions ####################################################################################################################
