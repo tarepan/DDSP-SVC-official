@@ -43,11 +43,6 @@ def calc_same_padding(kernel_size):
     return (pad, pad - (kernel_size + 1) % 2)
 
 
-class Swish(nn.Module):
-    def forward(self, x):
-        return x * x.sigmoid()
-
-
 class Transpose(nn.Module):
     def __init__(self, dims):
         super().__init__()
@@ -56,16 +51,6 @@ class Transpose(nn.Module):
 
     def forward(self, x):
         return x.transpose(*self.dims)
-
-
-class GLU(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.dim = dim
-
-    def forward(self, x):
-        out, gate = x.chunk(2, dim=self.dim)
-        return out * gate.sigmoid()
 
 
 class DepthWiseConv1d(nn.Module):
@@ -80,7 +65,7 @@ class DepthWiseConv1d(nn.Module):
 
 
 class ConformerConvModule(nn.Module):
-    """Alternative of Transformer's point-wise FF layer (LN-SegFC-GLU-DepthConv-Swish-SegFC-Do)."""
+    """Alternative of Transformer's point-wise FF layer (LN-SegFC-GLU-DepthConv-SiLU-SegFC-Do)."""
     def __init__(self, dim, causal = False, expansion_factor = 2, kernel_size = 31, dropout = 0.):
         super().__init__()
 
@@ -91,9 +76,9 @@ class ConformerConvModule(nn.Module):
             nn.LayerNorm(dim),
             Transpose((1, 2)),
             nn.Conv1d(      dim,       inner_dim * 2, 1),
-            GLU(dim=1),
+            nn.GLU(dim=1),
             DepthWiseConv1d(inner_dim, inner_dim,     kernel_size, padding = padding),
-            Swish(),
+            nn.SiLU(),
             nn.Conv1d(      inner_dim, dim,           1),
             Transpose((1, 2)),
             nn.Dropout(dropout)
