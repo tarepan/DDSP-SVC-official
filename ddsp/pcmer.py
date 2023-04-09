@@ -196,12 +196,9 @@ class FastAttention(nn.Module):
         # Attention function
         self.causal = causal
         if causal:
-            try:
-                import fast_transformers.causal_product.causal_product_cuda
-                causal_linear_fn = partial(causal_linear_attention)
-            except ImportError:
-                print('unable to import cuda code for auto-regressive Performer. will default to the memory inefficient non-cuda version')
-                causal_linear_fn = causal_linear_attention_noncuda
+            # optimized CUDA executor
+            import fast_transformers.causal_product.causal_product_cuda
+            causal_linear_fn = partial(causal_linear_attention)
         self.attn_fn = linear_attention if not causal else causal_linear_fn
 
     @torch.no_grad()
