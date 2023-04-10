@@ -21,3 +21,4 @@ wave
 pysimplegui
 sounddevice
 # pytorch-fast-transformers
+gradio
