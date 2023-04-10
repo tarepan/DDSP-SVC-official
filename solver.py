@@ -28,14 +28,12 @@ def test(args, model, loss_func, loader_test, saver):
     with torch.no_grad():
         for bidx, data in enumerate(loader_test):
             fn = data['name'][0]
-            print('--------')
-            print(f'{bidx}/{num_batches} - {fn}')
+            print(f'--------\n{bidx}/{num_batches} - {fn}')
 
             # unpack data
             for k in data.keys():
                 if k != 'name':
                     data[k] = data[k].to(args.device)
-            print('>>', data['name'][0])
             audio_gt = data['audio']
 
             # Reconstruction forward
@@ -49,7 +47,7 @@ def test(args, model, loss_func, loader_test, saver):
             tgt_spk_id = torch.ones_like(tgt_spk_id) if tgt_spk_id == 0 else tgt_spk_id
             src_lfo = torch.tensor(lfo_stats[str(src_spk_id.cpu().item())], dtype=torch.float32).to(args.device)
             tgt_lfo = torch.tensor(lfo_stats[str(tgt_spk_id.cpu().item())], dtype=torch.float32).to(args.device)
-            print(f"{str(src_spk_id.cpu().item())}-to-{str(tgt_spk_id.cpu().item())}: {torch.exp(src_lfo).cpu().item()}-to-{torch.exp(tgt_lfo).cpu().item()}")
+            # print(f"{str(src_spk_id.cpu().item())}-to-{str(tgt_spk_id.cpu().item())}: {torch.exp(src_lfo).cpu().item()}-to-{torch.exp(tgt_lfo).cpu().item()}")
             fo = torch.exp(tgt_lfo * torch.log(data['f0']) / src_lfo)
             audio_vc, _, _ = model(data['units'], fo, data['volume'], tgt_spk_id)
 
@@ -65,14 +63,13 @@ def test(args, model, loss_func, loader_test, saver):
             rtf = run_time / song_time
             print(f'RTF: {rtf}  | {run_time} / {song_time}')
             rtf_all.append(rtf)
-           
+
             # loss
-            loss = loss_func(audio_pred, audio_gt)
-            test_loss += loss.item()
+            test_loss += loss_func(audio_pred, audio_gt).item()
 
             # log
             saver.log_audio({fn+'/gt.wav': audio_gt, fn+'/pred.wav': audio_pred, fn+'/vc.wav': audio_vc})
-            
+
     # report
     test_loss /= num_batches
     
@@ -108,7 +105,7 @@ def train(args, initial_global_step, model, optimizer, loss_func, loader_train, 
             for k in data.keys():
                 if k != 'name':
                     data[k] = data[k].to(args.device)
-            
+
             # forward/loss/Backward/Optim
             optimizer.zero_grad()
             signal, _, _ = model(data['units'].float(), data['f0'], data['volume'], data['spk_id'], infer=False)
@@ -129,7 +126,7 @@ def train(args, initial_global_step, model, optimizer, loss_func, loader_train, 
                         saver.global_step
                 ))
                 saver.log_value({ 'train/loss': loss.item() })
-            
+
             if saver.global_step % args.train.interval_val == 0:
                 # Validation
                 test_loss = test(args, model, loss_func, loader_test, saver)

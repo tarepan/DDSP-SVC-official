@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn.utils import weight_norm
-from extorch import Conv1dEx
+from extorch import Conv1dEx, Transpose
 
 from .pcmer import PCmer
 
@@ -21,6 +21,7 @@ def split_to_dict(tensor, tensor_splits):
 
 
 class Unit2Control(nn.Module):
+    """Convert a features series into another feature series, Conv-GN-Conv-sideEmb-ConvPerformer-LN-SegFC-split."""
     def __init__(self, ndim_feat_i, n_spk: int, output_splits, c: bool = False):
         """
         Args:
@@ -31,15 +32,16 @@ class Unit2Control(nn.Module):
         super().__init__()
 
         ndim_feat = 256
-        ndim_out = sum([v for _, v in output_splits.items()])
 
-        # PreNet - Conv-GN-LReLU-Conv
+        # PreNet for Unit :: (B, Frame, Feat) -> (B, Feat, Frame) -> ... -> (B, Feat, Frame) -> (B, Frame, Feat) - Conv-GN-LReLU-Conv
         kernel = 3
-        self.prenet = nn.Sequential(
+        self.unit_prenet = nn.Sequential(
+            Transpose(1, 2),
             Conv1dEx(ndim_feat_i, ndim_feat, kernel, padding="same", causal=c),
             nn.GroupNorm(4,       ndim_feat),
             nn.LeakyReLU(),
             Conv1dEx(ndim_feat,   ndim_feat, kernel, padding="same", causal=c),
+            Transpose(1, 2),
         )
 
         # Embedding
@@ -52,6 +54,7 @@ class Unit2Control(nn.Module):
 
         # Conformer decoder & Linear postNet
         num_layers, num_heads = 3, 8
+        ndim_out = sum([v for _, v in output_splits.items()])
         self.dec_post = nn.Sequential(
             PCmer(num_layers, num_heads, ndim_feat, c),
             nn.LayerNorm(ndim_feat),
@@ -66,19 +69,19 @@ class Unit2Control(nn.Module):
         """
         Args:
             units  :: (B, Frame, Feat) - Acoustic unit series
-            f0     :: (B, 1)           - Fundamental tone's frequency contour
+            f0     :: (B, Frame)       - Fundamental tone's frequency contour
             phase  :: (B, Frame)       - Frame-wise phase  contour (phase at frame start)
             volume :: (B, Frame)       - Frame-wise volume contour (non-overlapped RMS of the waveform)
             spk_id :: (B,)             - Speaker index
             spk_mix_dict
-        return: 
+        return:
             dict of (B, Frame, Feat)   - Feature serieses
         """
 
-        # PreNet :: (B, Frame, Feat) -> (B, Feat, Frame) -> (B, Feat, Frame) -> (B, Frame, Feat)
-        x = self.prenet(units.transpose(1,2)).transpose(1,2)
+        # Unit PreNet :: (B, Frame, Feat) -> (B, Frame, Feat)
+        x = self.unit_prenet(units)
 
-        # Embedding
+        # Embedding :: (B, Frame) -> (B, Frame, Feat=1) -> (B, Frame, Emb=Feat) -> sum
         ## Add continuous embeddings of fo/phase/volume to processed unit
         phase, volume = phase.unsqueeze(-1), volume.unsqueeze(-1)
         x = x + self.f0_embed((1+ f0 / 700).log()) + self.phase_embed(phase / np.pi) + self.volume_embed(volume)

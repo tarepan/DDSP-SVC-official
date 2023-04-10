@@ -4,7 +4,7 @@ import math
 from functools import partial
 from einops import rearrange, repeat
 import torch.nn.functional as F
-from extorch import Conv1dEx
+from extorch import Conv1dEx, Transpose
 
 
 class PCmer(nn.Module):
@@ -38,35 +38,27 @@ class _EncoderLayer(nn.Module):
 
 
 #### ConvFF #########################################################################################################################
-class Transpose(nn.Module):
-    def __init__(self, dims):
-        super().__init__()
-        assert len(dims) == 2, 'dims must be a tuple of two dimensions'
-        self.dims = dims
-
-    def forward(self, x):
-        return x.transpose(*self.dims)
-
-
 class ConformerConvModule(nn.Module):
     """Alternative of Transformer's point-wise FF layer (LN-SegFC-GLU-DepthConv-SiLU-SegFC-Do)."""
     def __init__(self, dim, causal = False, expansion_factor = 2, kernel_size = 31, dropout = 0.):
         super().__init__()
 
         inner_dim = dim * expansion_factor
+        # (B, T, Feat) -> (B, Feat, T) -> ... -> (B, Feat, T) -> (B, T, Feat)
         self.net = nn.Sequential(
             nn.LayerNorm(dim),
-            Transpose((1, 2)),
+            Transpose(1, 2),
             nn.Conv1d(dim,       inner_dim * 2, 1),
             nn.GLU(dim=1),
             Conv1dEx(inner_dim,  inner_dim,     kernel_size, padding="same", groups=inner_dim, causal=causal),
             nn.SiLU(),
             nn.Conv1d(inner_dim, dim,           1),
-            Transpose((1, 2)),
+            Transpose(1, 2),
             nn.Dropout(dropout)
         )
 
     def forward(self, x):
+        """:: (B, T, Feat) -> (B, T, Feat)"""
         return self.net(x)
 #### /ConvFF ########################################################################################################################
 
