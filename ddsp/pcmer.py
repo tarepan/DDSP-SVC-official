@@ -5,6 +5,7 @@ from functools import partial
 from einops import rearrange, repeat
 import torch.nn.functional as F
 from extorch import Conv1dEx, Transpose
+from fast_transformers.causal_product import CausalDotProduct
 
 
 class PCmer(nn.Module):
@@ -197,9 +198,6 @@ class FastAttention(nn.Module):
         self.register_buffer('projection_matrix', self.create_projection())
 
         # Attention function
-        if causal:
-            from fast_transformers.causal_product import CausalDotProduct
-
         self.attn_fn = linear_attention if not causal else causal_linear_attention
 
     @torch.no_grad()

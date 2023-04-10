@@ -20,5 +20,5 @@ tqdm
 wave
 pysimplegui
 sounddevice
-# pytorch-fast-transformers
+pytorch-fast-transformers
 gradio
