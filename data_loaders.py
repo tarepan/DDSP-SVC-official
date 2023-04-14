@@ -10,8 +10,8 @@ from logger.utils import traverse_dir
 
 
 def get_data_loaders(args, whole_audio=False):
-    data_train = AudioDataset(args.data.train_path, waveform_sec=args.data.duration, hop_size=args.data.block_size, sample_rate=args.data.sampling_rate, load_all_data=args.train.cache_all_data, whole_audio=whole_audio, n_spk=args.model.n_spk, device=args.train.cache_device, fp16=args.train.cache_fp16)
-    data_valid = AudioDataset(args.data.valid_path, waveform_sec=args.data.duration, hop_size=args.data.block_size, sample_rate=args.data.sampling_rate, load_all_data=args.train.cache_all_data, whole_audio=True,        n_spk=args.model.n_spk)
+    data_train = AudioDataset(args.data.train_path, waveform_sec=args.data.duration, hop_size=args.data.block_size, sample_rate=args.data.sampling_rate, load_all_data=args.train.cache_all_data, whole_audio=whole_audio, n_spk=args.model.n_spk, n_aunit=args.data.n_aunit, device=args.train.cache_device, fp16=args.train.cache_fp16)
+    data_valid = AudioDataset(args.data.valid_path, waveform_sec=args.data.duration, hop_size=args.data.block_size, sample_rate=args.data.sampling_rate, load_all_data=args.train.cache_all_data, whole_audio=True,        n_spk=args.model.n_spk, n_aunit=args.data.n_aunit)
     loader_train = torch.utils.data.DataLoader(
         data_train ,
         batch_size=args.train.batch_size if not whole_audio else 1,
@@ -33,16 +33,17 @@ class AudioDataset(Dataset):
         load_all_data: bool = True, # How many data loaded on device (True: all data, False: only light-weight items)
         whole_audio=False,          # Whether to use whole audio or w/ length clipping
         n_spk: int = 1,             # The number of speakers
-        device = 'cpu',              # Device on which cache data will be loaded
+        n_aunit: int = 0,
+        device = 'cpu',             # Device on which cache data will be loaded
         fp16 = False,
     ):
         super().__init__()
-        
+        self._n_aunit = n_aunit
         self.waveform_sec = waveform_sec
         self.sample_rate = sample_rate
         self.hop_size = hop_size
         self.path_root = path_root
-        # Path of .wav files (w/o extension)
+        # Path of .wav files (w/o extension, e.g. `5/uttr_001`)
         self.paths = traverse_dir(os.path.join(path_root, 'audio'), extension='wav', is_pure=True, is_ext=False)
         self.whole_audio = whole_audio
         self.data_buffer={}
@@ -50,32 +51,39 @@ class AudioDataset(Dataset):
             print('Load all the data from :', path_root)
         else:
             print('Load the f0, volume data from :', path_root)
-        for name in tqdm(self.paths, total=len(self.paths)):
-            path_audio = os.path.join(self.path_root, 'audio', name) + '.wav'
+        
+        # f"{N}/{uttr_name}"
+        for p_rel_stem in tqdm(self.paths, total=len(self.paths)):
+            path_audio = os.path.join(self.path_root, 'audio', p_rel_stem) + '.wav'
 
-            # Audio::(T,) / Unit::maybe(Frame, Feat) (if configured, on device)
-            audio  = torch.from_numpy(librosa.load(path_audio, sr=self.sample_rate, mono=True)[0]   ).float().to(device) if load_all_data else None
-            units  = torch.from_numpy(np.load(os.path.join(self.path_root, 'units',  name) + '.npy')).float().to(device) if load_all_data else None
+            # Audio::(T,) (if configured, on device)
+            audio  = torch.from_numpy(librosa.load(path_audio, sr=self.sample_rate, mono=True)[0]         ).float().to(device) if load_all_data else None
             # Duration::(1,) / fo::maybe(Frame, 1) / Volume::(Frame,) - always on device
             duration = librosa.get_duration(filename = path_audio, sr = self.sample_rate)
-            f0     = torch.from_numpy(np.load(os.path.join(self.path_root, 'f0',     name) + '.npy')).float().unsqueeze(-1).to(device)
-            volume = torch.from_numpy(np.load(os.path.join(self.path_root, 'volume', name) + '.npy')).float().to(device)
+            f0     = torch.from_numpy(np.load(os.path.join(self.path_root, 'f0',     p_rel_stem) + '.npy')).float().unsqueeze(-1).to(device)
+            volume = torch.from_numpy(np.load(os.path.join(self.path_root, 'volume', p_rel_stem) + '.npy')).float().to(device)
 
             # Speaker index :: (1,) - always on device
-            dir_name = os.path.dirname(name)
-            assert str.isdigit(dir_name), f"Directory name should be positive integer, but set to '{dir_name}'"
-            spk_id = int(dir_name)
+            spk_name = os.path.dirname(p_rel_stem)
+            assert str.isdigit(spk_name), f"Directory name should be positive integer, but set to '{spk_name}'"
+            spk_id = int(spk_name)
             if spk_id < 1 or n_spk < spk_id:
                 raise ValueError(' [x] spk_id (derived from directory name) must be an integer within [1, n_spk]')
             spk_id = torch.LongTensor(np.array([spk_id])).to(device)
 
+            # Unit :: (Frame, Feat) (if configured, on device)
+            units = [
+                torch.from_numpy(np.load(os.path.join(self.path_root, 'units',  p_rel_stem) + f'{i}.npy')).float().to(device)
+                for i in range(1 + self._n_aunit)
+            ] if load_all_data else None
+
             # fp16
             if fp16:
                 audio = audio.half()
-                units = units.half()
+                units = [unit.half() for unit in units]
 
             # Pack
-            self.data_buffer[name] = { 'audio': audio, 'units': units, 'duration': duration, 'f0': f0, 'volume': volume, 'spk_id': spk_id, }
+            self.data_buffer[p_rel_stem] = { 'audio': audio, 'units': units, 'duration': duration, 'f0': f0, 'volume': volume, 'spk_id': spk_id, }
 
     def __getitem__(self, file_idx):
         name = self.paths[file_idx]
@@ -101,12 +109,16 @@ class AudioDataset(Dataset):
 
         # Load
         audio  = data_buffer.get('audio') # nullable
-        units  = data_buffer.get('units') # nullable
         f0     = data_buffer.get('f0')
         volume = data_buffer.get('volume')
         spk_id = data_buffer.get('spk_id')
-        if units is None:
-            units = torch.from_numpy(np.load(os.path.join(self.path_root, 'units', name) + '.npy')).float()
+        ## Unit
+        unit_idx = random.randint(0, self._n_aunit)
+        units = data_buffer.get('units')
+        if units is not None:
+            units = units[unit_idx]
+        else:
+            units = torch.from_numpy(np.load(os.path.join(self.path_root, 'units', name) + f'.{unit_idx}.npy')).float()
 
         # Clipping
         ## parameters

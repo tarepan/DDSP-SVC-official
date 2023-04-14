@@ -10,6 +10,7 @@ data:
   encoder_hop_size: 320
   encoder_out_channels: 256 # 768 if using 'hubertbase768' or 'contentvec768' encoder
   encoder_ckpt: pretrain/hubert/hubert-soft-0d54a1f4.pt
+  n_aunit: 0
   train_path: data/train # Create a folder named "audio" under this path and put the audio clip in it
   valid_path: data/val # Create a folder named "audio" under this path and put the audio clip in it
 model:

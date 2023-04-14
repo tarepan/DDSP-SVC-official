@@ -9,18 +9,21 @@ def traverse_dir(root_dir, extension, is_pure=False, is_ext=True):
     """glob, then format the path, finally sort if needed.
     Args:
         is_ext - Whether to include extention string as a file path
+        is_pure - Whether to return relative path toward `root_dir` or absolute path
     """
     file_list = []
+    # current_dir, child_dirs, child_files
     for root, _, files in os.walk(root_dir):
         for file in files:
             if file.endswith(extension):
-                # path
-                mix_path = os.path.join(root, file)
-                pure_path = mix_path[len(root_dir)+1:] if is_pure else mix_path
+                # path - full path | relative to `root_dir`
+                full_path = os.path.join(root, file)
+                pure_path = full_path[len(root_dir)+1:] if is_pure else full_path
 
                 if not is_ext:
                     ext = pure_path.split('.')[-1]
                     pure_path = pure_path[:-(len(ext)+1)]
+
                 file_list.append(pure_path)
     return file_list
 

@@ -11,10 +11,28 @@ from ddsp.vocoder import F0_Extractor, Volume_Extractor, Units_Encoder
 from logger.utils import traverse_dir
 
 
-def preprocess(path, f0_extractor, volume_extractor, units_encoder, sample_rate, hop_size, device = 'cuda', gen_stats: bool = False):
+def wave2unit(enc, wave, sr: int, hop_size: int, device, p_abs_unit: str, n_aunit: int):
+    """Convert waveform into unit series.
+
+    Args:
+        enc                   - Unit encoder
+        wave :: NDArray[(T,)] - Audio waveform
+        sr                    - Waveform's sampling rate
+        hop_size
+        device                - PyTorch device
+        p_abs_unit            - Absolute path of output (f"{path}/units/{N}/{uttr_name}.npy")
+    """
+    # unit series :: (T,) -> (B=1, T) -> [encode] -> (B=1, Frame, Feat) -> (Frame, Feat)
+    unit_series = enc.encode(torch.from_numpy(wave).float().unsqueeze(0).to(device), sr, hop_size).squeeze(0).to("cpu").numpy()
+    np.save(f"{p_abs_unit[:-4]}.0.npy",  unit_series)
+
+
+def preprocess(path, f0_extractor, volume_extractor, units_encoder, sample_rate, hop_size, device = 'cuda', gen_stats: bool = False, n_aunit: int = 0):
     """
     Preprocess all files under the directory.
 
+    Args:
+        path - Data root path (e.g. `data/train`)
     Outputs:
         units  :: (Frame, Feat)
         volume :: (Frame,)
@@ -30,16 +48,23 @@ def preprocess(path, f0_extractor, volume_extractor, units_encoder, sample_rate,
     path_skipdir    = os.path.join(path, 'skip')
 
     # run  
-    def process(file):
-        """Process a file."""
-        ext = file.split('.')[-1]
-        binfile = file[:-(len(ext)+1)]+'.npy'
-        path_srcfile    = os.path.join(path_srcdir,    file)    # Path of source audio                           (.wav)
-        path_unitsfile  = os.path.join(path_unitsdir,  binfile) # Path of preprocessed unit                      (.npy)
-        path_f0file     = os.path.join(path_f0dir,     binfile) # Path of preprocessed fo                        (.npy)
-        path_f0statfile = os.path.join(path_f0statdir, binfile) # Path of fo contour statistics                  (.npy)
-        path_volumefile = os.path.join(path_volumedir, binfile) # Path of preprocessed volume                    (.npy)
-        path_skipfile   = os.path.join(path_skipdir,   file)    # Path to which audio is moved when all unvoiced (.wav)
+    def process(p_rel_wav_file):
+        """Process a file.
+        Args:
+            file - Path to the audio file (e.g. f"{N}/{uttr_name}.wav")
+        """
+        ext = p_rel_wav_file.split('.')[-1]
+        p_rel_bin_file = p_rel_wav_file[:-(len(ext)+1)]+'.npy'         # f"{N}/{uttr_name}.npy"
+        path_srcfile    = os.path.join(path_srcdir,    p_rel_wav_file) # Path of source audio                           (.wav) f"{path}/audio/{N}/{uttr_name}.wav"
+        path_f0file     = os.path.join(path_f0dir,     p_rel_bin_file) # Path of preprocessed fo                        (.npy) f"{path}/f0/{N}/{uttr_name}.npy"
+        path_f0statfile = os.path.join(path_f0statdir, p_rel_bin_file) # Path of fo contour statistics                  (.npy) f"{path}/f0_stat/{N}/{uttr_name}.npy"
+        path_volumefile = os.path.join(path_volumedir, p_rel_bin_file) # Path of preprocessed volume                    (.npy) f"{path}/volume/{N}/{uttr_name}.npy"
+        path_unitsfile  = os.path.join(path_unitsdir,  p_rel_bin_file) # Path of preprocessed unit                      (.npy) f"{path}/units/{N}/{uttr_name}.npy"
+        path_skipfile   = os.path.join(path_skipdir,   p_rel_wav_file) # Path to which audio is moved when all unvoiced (.wav) f"{path}/skip/{N}/{uttr_name}.wav"
+        os.makedirs(os.path.dirname(path_f0file),     exist_ok=True)
+        os.makedirs(os.path.dirname(path_f0statfile), exist_ok=True)
+        os.makedirs(os.path.dirname(path_volumefile), exist_ok=True)
+        os.makedirs(os.path.dirname(path_unitsfile),  exist_ok=True)
 
         # Audio :: (T,)
         audio = librosa.load(path_srcfile, sr=sample_rate, mono=True)[0]
@@ -47,8 +72,8 @@ def preprocess(path, f0_extractor, volume_extractor, units_encoder, sample_rate,
         # Volume :: (T,) -> (Frame,)
         volume = volume_extractor.extract(audio)
 
-        # Unit :: (T,) -> (B=1, T) -> [encode] -> (B=1, Frame, Feat) -> (Frame, Feat)
-        units = units_encoder.encode(torch.from_numpy(audio).float().unsqueeze(0).to(device), sample_rate, hop_size).squeeze().to('cpu').numpy()
+        # Unit :: (T,) -> (Frame, Feat)
+        wave2unit(units_encoder, audio, sample_rate, hop_size, device, path_unitsfile, n_aunit)
 
         # fo :: NDArray - fo contour, unvoiced is expressed as fo=0
         f0 = f0_extractor.extract(audio, uv_interp = False)
@@ -65,11 +90,6 @@ def preprocess(path, f0_extractor, volume_extractor, units_encoder, sample_rate,
             f0[unvoiced] = np.interp(np.where(unvoiced)[0], np.where(~unvoiced)[0], f0[~unvoiced])
 
         # Save
-            os.makedirs(os.path.dirname(path_unitsfile),  exist_ok=True)
-            os.makedirs(os.path.dirname(path_f0file),     exist_ok=True)
-            os.makedirs(os.path.dirname(path_f0statfile), exist_ok=True)
-            os.makedirs(os.path.dirname(path_volumefile), exist_ok=True)
-            np.save(path_unitsfile,  units)
             np.save(path_f0file,     f0)
             np.save(path_f0statfile, lfo_mean)
             np.save(path_volumefile, volume)
@@ -81,10 +101,11 @@ def preprocess(path, f0_extractor, volume_extractor, units_encoder, sample_rate,
             print('This file has been moved to ' + path_skipfile)
 
 
-    print('Preprocess the audio clips in :', path_srcdir)
-    filelist = traverse_dir(path_srcdir, extension='wav', is_pure=True, is_ext=True)
-    for file in tqdm(filelist, total=len(filelist)):
-        process(file)
+    print(f'Preprocess the audio clips in :{path_srcdir}') # f"{path}/audio"
+    # [f"{N}/{uttr_name}.wav"]
+    p_rel_wavs = traverse_dir(path_srcdir, extension='wav', is_pure=True, is_ext=True)
+    for p_rel_wav in tqdm(p_rel_wavs, total=len(p_rel_wavs)):
+        process(p_rel_wav)
 
     # seapker-wise fo stats (mean of log fo)
     # NOTE: very rough stats. Not standarized by audio length, just mean of mean
@@ -118,5 +139,5 @@ if __name__ == '__main__':
     units_encoder = Units_Encoder(d.encoder, d.encoder_ckpt, d.encoder_sample_rate, d.encoder_hop_size, device = device)
 
     # Preprocess train/val
-    preprocess(d.train_path, f0_extractor, volume_extractor, units_encoder, d.sampling_rate, d.block_size, device = device, gen_stats=True)
-    preprocess(d.valid_path, f0_extractor, volume_extractor, units_encoder, d.sampling_rate, d.block_size, device = device)
+    preprocess(d.train_path, f0_extractor, volume_extractor, units_encoder, d.sampling_rate, d.block_size, device = device, gen_stats=True, n_aunit=d.n_aunit)
+    preprocess(d.valid_path, f0_extractor, volume_extractor, units_encoder, d.sampling_rate, d.block_size, device = device,                 n_aunit=d.n_aunit)
