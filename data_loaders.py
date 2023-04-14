@@ -73,7 +73,7 @@ class AudioDataset(Dataset):
 
             # Unit :: (Frame, Feat) (if configured, on device)
             units = [
-                torch.from_numpy(np.load(os.path.join(self.path_root, 'units',  p_rel_stem) + f'{i}.npy')).float().to(device)
+                torch.from_numpy(np.load(os.path.join(self.path_root, 'units',  p_rel_stem) + f'.{i}.npy')).float().to(device)
                 for i in range(1 + self._n_aunit)
             ] if load_all_data else None
 
