@@ -8,6 +8,7 @@ PyYAML
 resampy
 # scikit_learn
 scipy
+SoundFile
 torchcrepe
 tqdm
 sounddevice
