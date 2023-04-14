@@ -158,6 +158,7 @@ class Units_Encoder:
             self.model = Audio2YUnit(device=device)
         else:
             raise ValueError(f" [x] Unknown units encoder: {encoder}")
+        self.model = self.model.eval()
 
         # { f"{sample_rate}": Resample_instance}
         self.resample_kernel = {}
