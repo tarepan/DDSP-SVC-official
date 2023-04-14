@@ -1,8 +1,10 @@
+import os
 import torch
 import librosa
 import argparse
 import numpy as np
 import soundfile as sf
+import hashlib
 from ast import literal_eval
 from slicer import Slicer
 from ddsp.vocoder import load_model, F0_Extractor, Volume_Extractor, Units_Encoder
@@ -69,17 +71,45 @@ if __name__ == '__main__':
     audio, sr_i = librosa.load(cmd.input, sr=cmd.sampling_rate, mono=True)
     hop_size = args.data.block_size * sr_i / args.data.sampling_rate
     
+    # get MD5 hash from wav file
+    md5_hash = ""
+    with open(cmd.input, 'rb') as f:
+        data = f.read()
+        md5_hash = hashlib.md5(data).hexdigest()
+        print("MD5: " + md5_hash)
+    
+    cache_dir_path = os.path.join(os.path.dirname(__file__), "cache")
+    cache_file_path = os.path.join(cache_dir_path, f"{cmd.pitch_extractor}_{cmd.f0_min}_{cmd.f0_max}_{md5_hash}.npy")
+    
     # Analysis
     ## fo
-    print('Pitch extractor type: ' + cmd.pitch_extractor)
-    pitch_extractor = F0_Extractor(cmd.pitch_extractor, sr_i, hop_size, float(cmd.f0_min), float(cmd.f0_max))
-    # NOTE: in flask_api.py, silence_front is used
-    f0 = torch.from_numpy(pitch_extractor.extract(audio, uv_interp = True, device = device)).float().to(device).unsqueeze(-1).unsqueeze(0)
+    is_cache_available = os.path.exists(cache_file_path)
+    if is_cache_available:
+        # f0 cache load
+        print('Loading pitch curves for input audio from cache directory...')
+        f0 = np.load(cache_file_path, allow_pickle=False)
+    else:
+        # extract f0
+        print(f'Pitch extractor type: {cmd.pitch_extractor}')
+        # NOTE: in flask_api.py, silence_front is used
+        pitch_extractor = F0_Extractor(cmd.pitch_extractor, sr_i, hop_size, float(cmd.f0_min), float(cmd.f0_max))
+        print('Extracting the pitch curve of the input audio...')
+        f0 = pitch_extractor.extract(audio, uv_interp = True, device = device)
+        
+        # f0 cache save
+        os.makedirs(cache_dir_path, exist_ok=True)
+        np.save(cache_file_path, f0, allow_pickle=False)
+    f0 = torch.from_numpy(f0).float().to(device).unsqueeze(-1).unsqueeze(0)
+
+    # key change
+    f0 = f0 * 2 ** (float(cmd.key) / 12)
+
     ## Volume :: (T,) -> (B=1, Frame)
+    print('Extracting the volume envelope of the input audio...')
     volume_np = Volume_Extractor(hop_size).extract(audio)
     volume = torch.from_numpy(volume_np).float().to(device).unsqueeze(0)
     ## mask
-    mask = (volume_np > 10 ** (float(cmd.threhold) / 20)).astype('float')
+    mask = (volume > 10 ** (float(cmd.threhold) / 20)).astype('float')
     mask = np.pad(mask, (4, 4), constant_values=(mask[0], mask[-1]))
     mask = np.array([np.max(mask[n : n + 9]) for n in range(len(mask) - 8)])
     mask = torch.from_numpy(mask).float().to(device).unsqueeze(-1).unsqueeze(0)
@@ -129,7 +159,7 @@ if __name__ == '__main__':
             seg_output *= mask[:, start_frame * args.data.block_size : (start_frame + seg_units.size(1)) * args.data.block_size]
             ## Enhancer
             if cmd.enhance == 'true':
-                seg_output, sr_o = enhancer.enhance(seg_output, args.data.sampling_rate, seg_f0, args.data.block_size, adaptive_key = float(cmd.enhancer_adaptive_key))
+                seg_output, sr_o = enhancer.enhance(seg_output, args.data.sampling_rate, seg_f0, args.data.block_size, adaptive_key = cmd.enhancer_adaptive_key)
             else:
                 sr_o = args.data.sampling_rate
             seg_output = seg_output.squeeze().cpu().numpy()
@@ -142,4 +172,3 @@ if __name__ == '__main__':
                 result = cross_fade(result, seg_output, current_length + silent_length)
             current_length = current_length + silent_length + len(seg_output)
         sf.write(cmd.output, result, sr_o)
-    
