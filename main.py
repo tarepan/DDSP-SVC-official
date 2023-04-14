@@ -1,11 +1,8 @@
-import os
 import torch
 import librosa
 import argparse
 import numpy as np
 import soundfile as sf
-import pyworld as pw
-import parselmouth
 from ast import literal_eval
 from slicer import Slicer
 from ddsp.vocoder import load_model, F0_Extractor, Volume_Extractor, Units_Encoder

@@ -4,13 +4,7 @@ import torchaudio
 
 
 class Slicer:
-    def __init__(self,
-                 sr: int,
-                 threshold: float = -40.,
-                 min_length: int = 5000,
-                 min_interval: int = 300,
-                 hop_size: int = 20,
-                 max_sil_kept: int = 5000):
+    def __init__(self, sr: int, threshold: float = -40., min_length: int = 5000, min_interval: int = 300, hop_size: int = 20, max_sil_kept: int = 5000):
         if not min_length >= min_interval >= hop_size:
             raise ValueError('The following condition must be satisfied: min_length >= min_interval >= hop_size')
         if not max_sil_kept >= hop_size:
@@ -123,11 +117,7 @@ def cut(audio_path, db_thresh=-30, min_len=5000, flask_mode=False, flask_sr=None
     else:
         audio = audio_path
         sr = flask_sr
-    slicer = Slicer(
-        sr=sr,
-        threshold=db_thresh,
-        min_length=min_len
-    )
+    slicer = Slicer(sr=sr, threshold=db_thresh, min_length=min_len)
     chunks = slicer.slice(audio)
     return chunks
 
@@ -139,7 +129,7 @@ def chunks2audio(audio_path, chunks):
         audio = torch.mean(audio, dim=0).unsqueeze(0)
     audio = audio.cpu().numpy()[0]
     result = []
-    for k, v in chunks.items():
+    for _, v in chunks.items():
         tag = v["split_time"].split(",")
         if tag[0] != tag[1]:
             result.append((v["slice"], audio[int(tag[0]):int(tag[1])]))

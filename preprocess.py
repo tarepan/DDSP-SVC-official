@@ -11,13 +11,6 @@ from ddsp.vocoder import F0_Extractor, Volume_Extractor, Units_Encoder
 from logger.utils import traverse_dir
 
 
-def parse_args(args=None, namespace=None):
-    """Parse command-line arguments."""
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-c", "--config", type=str, required=True, help="path to the config file")
-    return parser.parse_args(args=args, namespace=namespace)
-
-
 def preprocess(path, f0_extractor, volume_extractor, units_encoder, sample_rate, hop_size, device = 'cuda', gen_stats: bool = False):
     """
     Preprocess all files under the directory.
@@ -114,8 +107,9 @@ def preprocess(path, f0_extractor, volume_extractor, units_encoder, sample_rate,
 if __name__ == '__main__':
 
     # Configs
-    args = utils.load_config(parse_args().config)
-    d = args.data
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-c", "--config", type=str, required=True, help="path to the config file")
+    d = utils.load_config(parser.parse_args().config).data
 
     # Init
     device = 'cuda' if torch.cuda.is_available() else 'cpu'

@@ -3,7 +3,7 @@ data:
   f0_min: 65 # about C2
   f0_max: 800 # about G5
   sampling_rate: 44100
-  block_size: 512 # Equal to hop_length
+  block_size: 512 # Equal to hop_length, about 11.6 msec
   duration: 2 # Audio duration during training, must be less than the duration of the shortest audio clip
   encoder: 'yunit' # 'hubertsoft', 'hubertbase' or 'contentvec'
   encoder_sample_rate: 16000

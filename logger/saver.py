@@ -3,20 +3,15 @@ author: wayn391@mastertones
 '''
 
 import os
-import json
 import time
 import yaml
 import datetime
 import torch
-
-from . import utils
 from torch.utils.tensorboard import SummaryWriter
 
+
 class Saver(object):
-    def __init__(
-            self, 
-            args,
-            initial_global_step=-1):
+    def __init__(self, args, initial_global_step=-1):
 
         self.expdir = args.env.expdir
         self.sample_rate = args.data.sampling_rate
@@ -26,16 +21,12 @@ class Saver(object):
         self.init_time = time.time()
         self.last_time = time.time()
 
-        # makedirs
-        os.makedirs(self.expdir, exist_ok=True)       
-
-        # path
+        # Log file
+        os.makedirs(self.expdir, exist_ok=True)
         self.path_log_info = os.path.join(self.expdir, 'log_info.txt')
 
-        # ckpt
-        os.makedirs(self.expdir, exist_ok=True)       
-
-        # writer
+        # Writer
+        os.makedirs(self.expdir, exist_ok=True)
         self.writer = SummaryWriter(os.path.join(self.expdir, 'logs'))
         
         # save config
@@ -45,7 +36,7 @@ class Saver(object):
 
 
     def log_info(self, msg):
-        '''log method'''
+        """Log messages into stdout and file."""
         if isinstance(msg, dict):
             msg_list = []
             for k, v in msg.items():
@@ -60,7 +51,7 @@ class Saver(object):
         else:
             msg_str = msg
         
-        # dsplay
+        # display
         print(msg_str)
 
         # save
@@ -68,55 +59,32 @@ class Saver(object):
             fp.write(msg_str+'\n')
 
     def log_value(self, dict):
+        """Log items in TensorBoard."""
         for k, v in dict.items():
             self.writer.add_scalar(k, v, self.global_step)
     
     def log_audio(self, dict):
+        """Log audios in TensorBoard."""
         for k, v in dict.items():
             self.writer.add_audio(k, v, global_step=self.global_step, sample_rate=self.sample_rate)
     
-    def get_interval_time(self, update=True):
+    def get_interval_time(self):
         cur_time = time.time()
         time_interval = cur_time - self.last_time
-        if update:
-            self.last_time = cur_time
+        self.last_time = cur_time
         return time_interval
 
-    def get_total_time(self, to_str=True):
+    def get_total_time(self):
         total_time = time.time() - self.init_time
-        if to_str:
-            total_time = str(datetime.timedelta(
-                seconds=total_time))[:-5]
+        total_time = str(datetime.timedelta(seconds=total_time))[:-5]
         return total_time
 
-    def save_model(
-            self,
-            model, 
-            optimizer,
-            name='model',
-            postfix='',
-            to_json=False):
-        # path
-        if postfix:
-            postfix = '_' + postfix
-        path_pt = os.path.join(
-            self.expdir , name+postfix+'.pt')
-       
-        # check
-        print(' [*] model checkpoint saved: {}'.format(path_pt))
+    def save_model(self, model, optimizer, postfix: str):
+        """Save states."""
+        path_pt = os.path.join(self.expdir , f'model_{postfix}.pt')
+        print(f' [*] model checkpoint saved: {path_pt}')
+        torch.save({'global_step': self.global_step, 'model': model.state_dict(), 'optimizer': optimizer.state_dict()}, path_pt)
 
-        # save
-        torch.save({
-            'global_step': self.global_step,
-            'model': model.state_dict(),
-            'optimizer': optimizer.state_dict()}, path_pt)
-            
-        # to json
-        if to_json:
-            path_json = os.path.join(
-                self.expdir , name+'.json')
-            utils.to_json(path_params, path_json)
-            
     def global_step_increment(self):
         self.global_step += 1
 

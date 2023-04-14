@@ -1,21 +1,11 @@
 import os
 import yaml
-import json
-import pickle
 import torch
 
-def traverse_dir(
-        root_dir,
-        extension,
-        amount=None,
-        str_include=None,
-        str_exclude=None,
-        is_pure=False,
-        is_sort=False,
-        is_ext=True):
 
+def traverse_dir(root_dir, extension, is_pure=False, is_sort=False, is_ext=True):
+    """glob, then format the path, finally sort if needed."""
     file_list = []
-    cnt = 0
     for root, _, files in os.walk(root_dir):
         for file in files:
             if file.endswith(extension):
@@ -23,23 +13,10 @@ def traverse_dir(
                 mix_path = os.path.join(root, file)
                 pure_path = mix_path[len(root_dir)+1:] if is_pure else mix_path
 
-                # amount
-                if (amount is not None) and (cnt == amount):
-                    if is_sort:
-                        file_list.sort()
-                    return file_list
-                
-                # check string
-                if (str_include is not None) and (str_include not in pure_path):
-                    continue
-                if (str_exclude is not None) and (str_exclude in pure_path):
-                    continue
-                
                 if not is_ext:
                     ext = pure_path.split('.')[-1]
                     pure_path = pure_path[:-(len(ext)+1)]
                 file_list.append(pure_path)
-                cnt += 1
     if is_sort:
         file_list.sort()
     return file_list
@@ -69,28 +46,10 @@ def load_config(path_config):
     with open(path_config, "r") as config:
         args = yaml.safe_load(config)
     args = DotDict(args)
-    # print(args)
     return args
 
-
-def to_json(path_params, path_json):
-    params = torch.load(path_params, map_location=torch.device('cpu'))
-    raw_state_dict = {}
-    for k, v in params.items():
-        val = v.flatten().numpy().tolist()
-        raw_state_dict[k] = val
-
-    with open(path_json, 'w') as outfile:
-        json.dump(raw_state_dict, outfile,indent= "\t")
-
            
-def load_model(
-        expdir, 
-        model,
-        optimizer,
-        name='model',
-        postfix='',
-        device='cpu'):
+def load_model(expdir, model, optimizer, name='model', postfix='', device='cpu'):
     if postfix == '':
         postfix = '_' + postfix
     path = os.path.join(expdir, name+postfix)

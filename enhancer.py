@@ -5,6 +5,7 @@ from nsf_hifigan.nvSTFT import STFT
 from nsf_hifigan.models import load_model
 from torchaudio.transforms import Resample
 
+
 class Enhancer:
     def __init__(self, enhancer_type, enhancer_ckpt, device=None):
         if device is None:
@@ -20,15 +21,8 @@ class Enhancer:
         self.enhancer_sample_rate = self.enhancer.sample_rate()
         self.enhancer_hop_size = self.enhancer.hop_size()
         
-    def enhance(self,
-                audio, # 1, T
-                sample_rate,
-                f0, # 1, n_frames, 1
-                hop_size,
-                adaptive_key = 0,
-                silence_front = 0
-                ):
-        """Forward"""
+    def enhance(self, audio, sample_rate, f0, hop_size, adaptive_key = 0, silence_front = 0):
+        """Forward, audio :: (1, T), f0 :: (1, n_frames, 1)"""
 
         # enhancer start time 
         start_frame = int(silence_front * sample_rate / hop_size)
@@ -98,14 +92,7 @@ class NsfHifiGAN(torch.nn.Module):
         return self.h.hop_size
         
     def forward(self, audio, f0):
-        stft = STFT(
-                self.h.sampling_rate, 
-                self.h.num_mels, 
-                self.h.n_fft, 
-                self.h.win_size, 
-                self.h.hop_size, 
-                self.h.fmin, 
-                self.h.fmax)
+        stft = STFT(self.h.sampling_rate, self.h.num_mels, self.h.n_fft, self.h.win_size, self.h.hop_size, self.h.fmin, self.h.fmax)
         with torch.no_grad():
             mel = stft.get_mel(audio)
             enhanced_audio = self.model(mel, f0[:,:mel.size(-1)])
