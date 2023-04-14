@@ -22,7 +22,6 @@ def traverse_dir(root_dir, extension, is_pure=False, is_sort=False, is_ext=True)
     return file_list
 
 
-    
 class DotDict(dict):
     def __getattr__(*args):         
         val = dict.get(*args)         
@@ -32,32 +31,22 @@ class DotDict(dict):
     __delattr__ = dict.__delitem__
 
 
-def get_network_paras_amount(model_dict):
-    info = dict()
-    for model_name, model in model_dict.items():
-        # all_params = sum(p.numel() for p in model.parameters())
-        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-        info[model_name] = trainable_params
-    return info
-
-
 def load_config(path_config):
     with open(path_config, "r") as config:
         args = yaml.safe_load(config)
     args = DotDict(args)
     return args
 
-           
-def load_model(expdir, model, optimizer, name='model', postfix='', device='cpu'):
-    if postfix == '':
-        postfix = '_' + postfix
-    path = os.path.join(expdir, name+postfix)
-    path_pt = traverse_dir(expdir, '.pt', is_ext=False)
+
+def load_model(expdir, model, optimizer, device='cpu'):
+    """Load most fresh model states in a directory."""
+    path = os.path.join(expdir, 'model_')
+    path_pts = traverse_dir(expdir, '.pt', is_ext=False)
     global_step = 0
-    if len(path_pt) > 0:
-        steps = [s[len(path):] for s in path_pt]
+    if len(path_pts) > 0:
+        steps = [s[len(path):] for s in path_pts]
         maxstep = max([int(s) if s.isdigit() else 0 for s in steps])
+        # Biggest step || best.pt
         if maxstep > 0:
             path_pt = path+str(maxstep)+'.pt'
         else:

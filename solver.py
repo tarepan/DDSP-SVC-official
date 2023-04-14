@@ -88,9 +88,6 @@ def train(args, initial_global_step, model, optimizer, loss_func, loader_train, 
     # Init
     ## Saver
     saver = Saver(args, initial_global_step=initial_global_step)
-    ## Model size
-    saver.log_info('--- model size ---')
-    saver.log_info(utils.get_network_paras_amount({'model': model}))
     ## Runner    
     best_loss = np.inf
     num_batches = len(loader_train)
