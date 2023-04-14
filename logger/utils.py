@@ -1,10 +1,15 @@
+"""Utilities"""
+
 import os
 import yaml
 import torch
 
 
-def traverse_dir(root_dir, extension, is_pure=False, is_sort=False, is_ext=True):
-    """glob, then format the path, finally sort if needed."""
+def traverse_dir(root_dir, extension, is_pure=False, is_ext=True):
+    """glob, then format the path, finally sort if needed.
+    Args:
+        is_ext - Whether to include extention string as a file path
+    """
     file_list = []
     for root, _, files in os.walk(root_dir):
         for file in files:
@@ -17,12 +22,11 @@ def traverse_dir(root_dir, extension, is_pure=False, is_sort=False, is_ext=True)
                     ext = pure_path.split('.')[-1]
                     pure_path = pure_path[:-(len(ext)+1)]
                 file_list.append(pure_path)
-    if is_sort:
-        file_list.sort()
     return file_list
 
 
 class DotDict(dict):
+    """easy-access object.⚡"""
     def __getattr__(*args):         
         val = dict.get(*args)         
         return DotDict(val) if type(val) is dict else val   
@@ -32,6 +36,7 @@ class DotDict(dict):
 
 
 def load_config(path_config):
+    """Load yaml file as easy-access config.⚡"""
     with open(path_config, "r") as config:
         args = yaml.safe_load(config)
     args = DotDict(args)
@@ -39,7 +44,7 @@ def load_config(path_config):
 
 
 def load_model(expdir, model, optimizer, device='cpu'):
-    """Load most fresh model states in a directory."""
+    """Load most fresh model states in a directory.⚡"""
     path = os.path.join(expdir, 'model_')
     path_pts = traverse_dir(expdir, '.pt', is_ext=False)
     global_step = 0

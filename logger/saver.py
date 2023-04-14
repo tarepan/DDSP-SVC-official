@@ -1,4 +1,4 @@
-'''
+'''⚡
 author: wayn391@mastertones
 '''
 
@@ -11,6 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 
 class Saver(object):
+    """Logger & state saver.⚡"""
     def __init__(self, args, initial_global_step=-1):
 
         self.expdir = args.env.expdir

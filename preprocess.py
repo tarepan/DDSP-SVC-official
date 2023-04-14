@@ -82,7 +82,7 @@ def preprocess(path, f0_extractor, volume_extractor, units_encoder, sample_rate,
 
 
     print('Preprocess the audio clips in :', path_srcdir)
-    filelist = traverse_dir(path_srcdir, extension='wav', is_pure=True, is_sort=True, is_ext=True)
+    filelist = traverse_dir(path_srcdir, extension='wav', is_pure=True, is_ext=True)
     for file in tqdm(filelist, total=len(filelist)):
         process(file)
 

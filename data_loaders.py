@@ -42,8 +42,8 @@ class AudioDataset(Dataset):
         self.sample_rate = sample_rate
         self.hop_size = hop_size
         self.path_root = path_root
-        # Path of .wav files
-        self.paths = traverse_dir(os.path.join(path_root, 'audio'), extension='wav', is_pure=True, is_sort=True, is_ext=False)
+        # Path of .wav files (w/o extension)
+        self.paths = traverse_dir(os.path.join(path_root, 'audio'), extension='wav', is_pure=True, is_ext=False)
         self.whole_audio = whole_audio
         self.data_buffer={}
         if load_all_data:
