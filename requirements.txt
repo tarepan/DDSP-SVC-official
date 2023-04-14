@@ -1,11 +1,6 @@
 einops
 # fairseq
-flask
-flask_cors
-gin
-gin_config
 librosa
-# local_attention
 numpy
 praat-parselmouth
 pyworld
@@ -13,12 +8,8 @@ PyYAML
 resampy
 # scikit_learn
 scipy
-SoundFile
-tensorboard
 torchcrepe
 tqdm
-wave
-pysimplegui
 sounddevice
 pytorch-fast-transformers
 gradio
