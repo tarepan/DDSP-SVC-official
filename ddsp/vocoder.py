@@ -62,7 +62,7 @@ class F0_Extractor:
 
         # 'dio' - DIO + stonemask by `pyworld`
         elif self.f0_extractor == 'dio':
-            _f0, t = pw.dio(audio.astype('double'), self.sample_rate, f0_floor = self.f0_min, f0_ceil = self.f0_max, channels_in_octave=2, 
+            _f0, t = pw.dio(audio.astype('double'), self.sample_rate, f0_floor = self.f0_min, f0_ceil = self.f0_max, channels_in_octave=2,
                 frame_period = (1000 * self.hop_size / self.sample_rate))
             f0 = pw.stonemask(audio.astype('double'), _f0, t, self.sample_rate)
             f0 = np.pad(f0.astype('float'), (start_frame, n_frames - len(f0) - start_frame))
@@ -422,6 +422,7 @@ class CombSubFast(torch.nn.Module):
 
         self.register_buffer("sampling_rate", torch.tensor(sampling_rate))
         self.register_buffer("block_size",    torch.tensor(block_size))
+        # Half-overlap window
         self.register_buffer("window",        torch.sqrt(torch.hann_window(2 * block_size)))
         self.unit2ctrl = Unit2Control(n_unit, n_spk, { 'harmonic_magnitude': block_size + 1, 'harmonic_phase': block_size + 1, 'noise_magnitude': block_size + 1, }, c)
 
@@ -434,6 +435,8 @@ class CombSubFast(torch.nn.Module):
 
             initial_phase :: (B,)             - Initial phase [rad] (not used now)
         '''
+        pad_l, pad_r = self.block_size, self.block_size
+
         # Sample/Frame-wise frequency contour [Hz] & rotation contour [・] & phase contour [rad] :: (B, T) | (B, Frame)
         f0 = upsample(f0_frames, self.block_size).squeeze(-1)
         rot = fo_to_rot(f0, self.sampling_rate, initial_phase, infer)
@@ -443,15 +446,18 @@ class CombSubFast(torch.nn.Module):
         ctrls = self.unit2ctrl(units_frames, f0_frames, phase_frames, volume_frames, spk_id, spk_mix_dict=spk_mix_dict)
         harmo_mag, harmo_phase, noise_mag = ctrls['harmonic_magnitude'], ctrls['harmonic_phase'], ctrls['noise_magnitude']
 
-        # exciter signals
+        # Excitations
         ## combtooth - rotation contour [Hz] / fo contour [Hz]
         combtooth = torch.sinc(self.sampling_rate * rot / (f0 + 1e-3))
-        combtooth_frames = F.pad(combtooth, (self.block_size, self.block_size)).unfold(1, 2 * self.block_size, self.block_size)
+        combtooth[f0<=0.] = 0.
+        noise     = torch.rand_like(combtooth) * 2 - 1
+        ## Framing - Padding & unfolding & windowing
+        combtooth = F.pad(combtooth, (pad_l, pad_r))
+        noise     = F.pad(noise,     (pad_l, pad_r))
+        combtooth_frames = combtooth.unfold(1, 2 * self.block_size, self.block_size)
+        noise_frames     =     noise.unfold(1, 2 * self.block_size, self.block_size)
         combtooth_frames = combtooth_frames * self.window
-        ## noise
-        noise = torch.rand_like(combtooth) * 2 - 1
-        noise_frames = F.pad(noise, (self.block_size, self.block_size)).unfold(1, 2 * self.block_size, self.block_size)
-        noise_frames = noise_frames * self.window
+        noise_frames     = noise_frames     * self.window
 
         # filters - (maybe) transfer function H(ω)
         ## harmo - H_h(ω) = exp(a + j*π*p)
@@ -465,11 +471,15 @@ class CombSubFast(torch.nn.Module):
         combtooth_fft = torch.fft.rfft(combtooth_frames, 2 * self.block_size)
         noise_fft     = torch.fft.rfft(noise_frames,     2 * self.block_size)
         signal_fft = combtooth_fft * src_filter + noise_fft * noise_filter
-        signal_frames_out = torch.fft.irfft(signal_fft,  2 * self.block_size) * self.window
+        signal_frames_out = torch.fft.irfft(signal_fft,  2 * self.block_size)
 
-        # overlap add
+        # OverLap-Add
         fold = torch.nn.Fold(output_size=(1, (signal_frames_out.size(1) + 1) * self.block_size), kernel_size=(1, 2 * self.block_size), stride=(1, self.block_size))
-        signal = fold(signal_frames_out.transpose(1, 2))[:, 0, 0, self.block_size : -self.block_size]
+        signal_frames_out = signal_frames_out * self.window
+        signal = fold(signal_frames_out.transpose(1, 2))
+
+        # Remove padding
+        signal = signal[:, 0, 0, pad_l:-pad_r]
 
         return signal, phase_frames.unsqueeze(-1), (signal, signal)
 

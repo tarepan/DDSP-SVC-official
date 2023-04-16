@@ -27,7 +27,7 @@ def wave2unit(enc, wave, sr: int, hop_size: int, device, p_abs_unit: str, n_auni
     np.save(f"{p_abs_unit[:-4]}.0.npy",  unit_series)
 
 
-def preprocess(path, f0_extractor, volume_extractor, units_encoder, sample_rate, hop_size, device = 'cuda', gen_stats: bool = False, n_aunit: int = 0):
+def preprocess(path, f0_extractor, volume_extractor, units_encoder, sample_rate, hop_size, device = 'cuda', gen_stats: bool = False, n_aunit: int = 0, use_vuv: bool = False):
     """
     Preprocess all files under the directory.
 
@@ -86,8 +86,9 @@ def preprocess(path, f0_extractor, volume_extractor, units_encoder, sample_rate,
         # TODO: implementation
         # NOTE: V/UV information is intentionally discarded. Interesting!
         if len(f0[~unvoiced]) > 0:
-            # contain voiced, so interpolate the unvoiced f0
-            f0[unvoiced] = np.interp(np.where(unvoiced)[0], np.where(~unvoiced)[0], f0[~unvoiced])
+            if not use_vuv:
+                # contain voiced, so interpolate the unvoiced f0
+                f0[unvoiced] = np.interp(np.where(unvoiced)[0], np.where(~unvoiced)[0], f0[~unvoiced])
 
         # Save
             np.save(path_f0file,     f0)
@@ -139,5 +140,5 @@ if __name__ == '__main__':
     units_encoder = Units_Encoder(d.encoder, d.encoder_ckpt, d.encoder_sample_rate, d.encoder_hop_size, device = device)
 
     # Preprocess train/val
-    preprocess(d.train_path, f0_extractor, volume_extractor, units_encoder, d.sampling_rate, d.block_size, device = device, gen_stats=True, n_aunit=d.n_aunit)
-    preprocess(d.valid_path, f0_extractor, volume_extractor, units_encoder, d.sampling_rate, d.block_size, device = device,                 n_aunit=d.n_aunit)
+    preprocess(d.train_path, f0_extractor, volume_extractor, units_encoder, d.sampling_rate, d.block_size, device = device, gen_stats=True, n_aunit=d.n_aunit, use_vuv=d.use_vuv)
+    preprocess(d.valid_path, f0_extractor, volume_extractor, units_encoder, d.sampling_rate, d.block_size, device = device,                 n_aunit=d.n_aunit, use_vuv=d.use_vuv)

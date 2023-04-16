@@ -11,6 +11,7 @@ data:
   encoder_out_channels: 512
   encoder_ckpt: placeholder
   n_aunit: 0
+  use_vuv: false
   train_path: data/train # Create a folder named "audio" under this path and put the audio clip in it
   valid_path: data/val # Create a folder named "audio" under this path and put the audio clip in it
 model:
