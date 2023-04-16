@@ -43,10 +43,13 @@ def test(args, model, loss_func, loader_test, saver):
 
             # VC forward
             src_spk_id = data['spk_id']
+            # 1->2%N=2, 2->3%N=3, ..., N-1->N%N=0->1, N->N+1%N=1
             tgt_spk_id = (src_spk_id + 1) % args.model.n_spk
             tgt_spk_id = torch.ones_like(tgt_spk_id) if tgt_spk_id == 0 else tgt_spk_id
-            src_lfo = torch.tensor(lfo_stats[str(src_spk_id.cpu().item())], dtype=torch.float32).to(args.device)
-            tgt_lfo = torch.tensor(lfo_stats[str(tgt_spk_id.cpu().item())], dtype=torch.float32).to(args.device)
+            src_spk_num = str(src_spk_id.cpu().item())
+            tgt_spk_num = str(tgt_spk_id.cpu().item())
+            src_lfo = torch.tensor(lfo_stats[src_spk_num], dtype=torch.float32).to(args.device)
+            tgt_lfo = torch.tensor(lfo_stats[tgt_spk_num], dtype=torch.float32).to(args.device)
             # print(f"{str(src_spk_id.cpu().item())}-to-{str(tgt_spk_id.cpu().item())}: {torch.exp(src_lfo).cpu().item()}-to-{torch.exp(tgt_lfo).cpu().item()}")
             fo = torch.exp(tgt_lfo * torch.log(data['f0']) / src_lfo)
             audio_vc, _, _ = model(data['units'], fo, data['volume'], tgt_spk_id)
@@ -68,7 +71,7 @@ def test(args, model, loss_func, loader_test, saver):
             test_loss += loss_func(audio_pred, audio_gt).item()
 
             # log
-            saver.log_audio({fn+'/gt.wav': audio_gt, fn+'/pred.wav': audio_pred, fn+'/vc.wav': audio_vc})
+            saver.log_audio({fn+'/gt.wav': audio_gt, fn+'/pred.wav': audio_pred, f"{fn}/vc_{src_spk_num}_to_{tgt_spk_num}.wav": audio_vc})
 
     # report
     test_loss /= num_batches
