@@ -18,6 +18,14 @@ from .core import fo_to_rot, frequency_filter, upsample, remove_above_fmax, Mask
 CREPE_RESAMPLE_KERNEL = {}
 
 class F0_Extractor:
+    """Extract fundamental frequency contour.
+
+    supported methods:
+        'parselmouth' - Autocorrelation method
+        'dio'         - Fundamental wave bank-based zero-crossing / peak-dip method
+        'harvest'     - 
+        'crepe'       -
+    """
     def __init__(self, f0_extractor: str, sample_rate: int = 44100, hop_size: int = 512, f0_min: int = 65, f0_max: int = 800):
         """
         Args:
